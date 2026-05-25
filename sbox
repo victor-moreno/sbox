@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# sbox — open a sandboxed shell in the current directory (no claude).
+# Detects the host platform and dispatches to lib/macos.sh or lib/linux.sh.
+set -e
+
+if [ -n "$SANDBOX_DIR" ]; then
+  echo "sbox: already inside a sandbox ($SANDBOX_DIR)" >&2
+  exit 1
+fi
+
+SBOX_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
+export SBOX_ROOT
+
+case "$(uname -s)" in
+  Darwin) exec "$SBOX_ROOT/lib/macos.sh" shell "$@" ;;
+  Linux)  exec "$SBOX_ROOT/lib/linux.sh" shell "$@" ;;
+  *)      echo "sbox: unsupported platform: $(uname -s)" >&2; exit 1 ;;
+esac
