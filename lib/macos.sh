@@ -47,6 +47,9 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
       printf '(allow file-read* file-write* (literal "%s"))\n' "$p"
     fi
   done
+  # allow the history file if configured (may be outside the RW subpaths above)
+  [[ -n "${SANDBOX_HISTFILE:-}" ]] && \
+    printf '(allow file-read* file-write* (literal "%s"))\n' "$SANDBOX_HISTFILE"
 } > "$POLICY"
 
 ZDOT=""
@@ -73,21 +76,26 @@ if [[ "$MODE" == "claude" ]]; then
 fi
 
 # ── shell mode ───────────────────────────────────────────────────────────────
+
+# Build PATH from paths.conf PATH_EXTRA + homebrew + system dirs
+_sandbox_path="${(j[:])PATH_EXTRA}"
+_sandbox_path="${_sandbox_path:+${_sandbox_path}:}${BREW}/bin:${BREW}/sbin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 ZDOT="$(mktemp -d /tmp/sbox-zdot-XXXXXX)"
 cat > "$ZDOT/.zshrc" <<RCEOF
 export PS1='%F{red}[sandbox:%1~]%f%# '
-[ -f "$HOME/.local/python3/bin/activate" ] && source "$HOME/.local/python3/bin/activate"
+${PYTHON_VENV:+[ -f "${PYTHON_VENV}" ] && source "${PYTHON_VENV}"}
 export EDITOR=nano
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export PYTHONPYCACHEPREFIX=/tmp
-export PATH="$HOME/.local/bin:$BREW/sbin:$HOME/.local/python3/bin:$HOME/bin:$BREW/bin:/Library/TeX/texbin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="${_sandbox_path}"
 alias ll='ls -la'
 alias lh='ll -h'
 alias top='top -o cpu'
 alias R='R --no-save --no-restore'
-export HISTFILE="$SANDBOX_DIR/.sandbox_history"
-export HISTSIZE=1000
+${SANDBOX_HISTFILE:+export HISTFILE="${SANDBOX_HISTFILE}"}
+${SANDBOX_HISTFILE:+export HISTSIZE=1000}
 export SANDBOX_DIR="$SANDBOX_DIR"
 ${ANTHROPIC_TUNNEL:+export ANTHROPIC_BASE_URL="$ANTHROPIC_TUNNEL"}
 setopt NO_HUP

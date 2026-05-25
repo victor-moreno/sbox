@@ -93,9 +93,10 @@ RC_FILE="$(mktemp /tmp/sbox-rc-XXXXXX)"
     printf 'source "%s/etc/profile.d/conda.sh"\n' "$CONDA_BASE"
     [ -n "$CONDA_ENV_NAME" ] && printf 'conda activate "%s" 2>/dev/null || true\n' "$CONDA_ENV_NAME"
   fi
+  if [ -n "${SANDBOX_HISTFILE:-}" ]; then
+    printf 'HISTFILE="%s"\nHISTSIZE=1000\n' "$SANDBOX_HISTFILE"
+  fi
   cat <<'RCEOF'
-HISTFILE="$SANDBOX_DIR/.sandbox_history"
-HISTSIZE=1000
 alias ll='ls -la'
 RCEOF
   if [ "$MODE" = "shell" ]; then
@@ -152,6 +153,12 @@ BWRAP_BASE=(
 ANTHROPIC_ENV=()
 [ -n "${ANTHROPIC_BASE_URL:-}" ] && ANTHROPIC_ENV=(ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL")
 
+# Build PATH from paths.conf PATH_EXTRA + conda + system dirs
+_extra_path=""
+for _p in "${PATH_EXTRA[@]+"${PATH_EXTRA[@]}"}"; do
+  _extra_path="${_extra_path}${_p}:"
+done
+
 ENV_BASE=(
   HOME="$HOME"
   USER="$(whoami)"
@@ -164,7 +171,7 @@ ENV_BASE=(
   SANDBOX_DIR="$SANDBOX_DIR"
   "${ANTHROPIC_ENV[@]}"
   "${CONDA_ENV_VARS[@]}"
-  PATH="$HOME/.local/bin:$HOME/bin:${CONDA_PATH_PREFIX}/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
+  PATH="${_extra_path}${CONDA_PATH_PREFIX}/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
 )
 
 # ── exec ─────────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ alias claude='$DIR/claude'	# starts claude inside a sandbox in current folder
 ```
 paths.conf		# define which paths the sandbox can get access RO / RW
 				# now:  RO paths with executable tools
-				#	RW ~/.claude, ~/.cache, ~/.config
+				#		RW ~/.claude, ~/.cache, ~/.config
 ```
 
 ```
