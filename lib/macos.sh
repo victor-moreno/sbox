@@ -47,6 +47,11 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
       printf '(allow file-read* file-write* (literal "%s"))\n' "$p"
     fi
   done
+  
+  # allow read keychain to get claude credentials
+  echo "(allow mach-lookup (global-name \"com.apple.SecurityServer\"))"
+  printf '(allow file-read* file-write* (subpath "%s/Library/Keychains"))\n' "$HOME"
+
   # allow the history file if configured (may be outside the RW subpaths above)
   [[ -n "${SANDBOX_HISTFILE:-}" ]] && \
     printf '(allow file-read* file-write* (literal "%s"))\n' "$SANDBOX_HISTFILE"
