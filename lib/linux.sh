@@ -1,21 +1,32 @@
 #!/usr/bin/env bash
 # linux.sh — sandbox implementation for Linux (bubblewrap).
-# Called by ../claude or ../sbox with mode = claude|shell.
+# Called by ../aicode or ../sbox with first arg = coder name | "shell".
 set -e
 
-MODE="$1"; shift
+CODER="$1"; shift
 
-SANDBOX_DIR="$(pwd)"
+SANDBOX_DIR="$(pwd -P)"
 SBOX_ROOT="${SBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd -P)}"
 
-# load user-editable whitelist (RW + RO arrays)
+# load user-editable whitelist
 # shellcheck disable=SC1091
 . "$SBOX_ROOT/paths.conf"
 
+# ── helper: get newline-delimited coder paths from CODER_RW_<CODER> ──────────
+# Config uses uppercase keys (CODER_RW_CLAUDE), coder name is lowercased.
+get_coder_paths() {
+  local _upper
+  _upper="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
+  local varname="CODER_RW_$_upper"
+  local value="${!varname:-}"
+  if [ -n "$value" ]; then
+    echo "$value"
+  else
+    printf '%s\n%s\n' "$HOME/.$1" "$HOME/.$1.json"
+  fi
+}
+
 # ── conda (optional) ─────────────────────────────────────────────────────────
-# Auto-detected if `conda` is on PATH. Override before running:
-#   CONDA_BASE=/path/to/miniconda CONDA_ENV=myenv sbox
-#   CONDA_BASE="" sbox       # disable conda entirely
 if [ -z "${CONDA_BASE+x}" ]; then
   if command -v conda &>/dev/null; then
     CONDA_BASE="$(conda info --base 2>/dev/null)"
@@ -40,13 +51,39 @@ if [ -n "$CONDA_BASE" ]; then
   fi
 fi
 
-# ── per-project claude dirs (created on host, bind-mounted into sandbox) ─────
-mkdir -p "$HOME/.claude"
-mkdir -p "$SANDBOX_DIR/.claude/projects"
-mkdir -p "$SANDBOX_DIR/.claude/session-env"
-mkdir -p "$SANDBOX_DIR/.claude/tasks"
-mkdir -p "$SANDBOX_DIR/.cache/claude"
-[ -f "$HOME/.claude.json" ] || echo '{}' > "$HOME/.claude.json"
+# ── per-project isolation (if coder is listed in CODER_PROJECT_ISOLATION) ────
+# Creates per-project overlays for conversation history under $PWD/.<coder>/
+PROJECT_BWRAP=()
+if [ "$CODER" != "shell" ]; then
+  for _isolate_coder in $CODER_PROJECT_ISOLATION; do
+    if [ "$_isolate_coder" = "$CODER" ]; then
+      mkdir -p "$HOME/.$CODER"
+      mkdir -p "$SANDBOX_DIR/.$CODER/projects"
+      mkdir -p "$SANDBOX_DIR/.$CODER/session-env"
+      mkdir -p "$SANDBOX_DIR/.$CODER/tasks"
+      mkdir -p "$SANDBOX_DIR/.cache/$CODER"
+      [ -f "$HOME/.$CODER.json" ] || echo '{}' > "$HOME/.$CODER.json"
+      PROJECT_BWRAP=(
+        --bind "$SANDBOX_DIR/.cache/$CODER" "$HOME/.cache/$CODER"
+        --bind "$HOME/.$CODER.json" "$HOME/.$CODER.json"
+        --bind "$SANDBOX_DIR/.$CODER/projects" "$HOME/.$CODER/projects"
+        --bind "$SANDBOX_DIR/.$CODER/session-env" "$HOME/.$CODER/session-env"
+        --bind "$SANDBOX_DIR/.$CODER/tasks" "$HOME/.$CODER/tasks"
+      )
+      break
+    fi
+  done
+fi
+
+# ── coder-specific RW binds from paths.conf CODER_RW ─────────────────────────
+# After the isolation block, which may create ~/.<coder> and ~/.<coder>.json
+CODER_BWRAP=()
+if [ "$CODER" != "shell" ]; then
+  while IFS= read -r _p; do
+    [ -e "$_p" ] || continue
+    CODER_BWRAP+=(--bind "$_p" "$_p")
+  done < <(get_coder_paths "$CODER")
+fi
 
 # ── build --dir chain so every parent of SANDBOX_DIR exists inside the tmpfs ─
 DIR_CHAIN=()
@@ -59,8 +96,6 @@ for SEG in "${SEGMENTS[@]}"; do
 done
 
 # ── translate paths.conf entries to bwrap binds ──────────────────────────────
-# ~/.claude.json is skipped here and bound below (essentials), so the same
-# rule applies on every host regardless of paths.conf edits.
 USER_BINDS=()
 for p in "${RO[@]}"; do
   [ -e "$p" ] || continue
@@ -68,11 +103,10 @@ for p in "${RO[@]}"; do
 done
 for p in "${RW[@]}"; do
   [ -e "$p" ] || continue
-  [ "$p" = "$HOME/.claude.json" ] && continue
   USER_BINDS+=(--bind "$p" "$p")
 done
 
-# ── conda bwrap args + env (only if conda configured) ────────────────────────
+# ── conda bwrap args + env ──────────────────────────────────────────────────
 CONDA_BWRAP=()
 CONDA_ENV_VARS=()
 CONDA_PATH_PREFIX=""
@@ -85,7 +119,7 @@ if [ -n "$CONDA_BASE" ]; then
   CONDA_PATH_PREFIX="${CONDA_ENV_PATH:+$CONDA_ENV_PATH/bin:}$CONDA_BASE/condabin:"
 fi
 
-# ── rc file (shared by both modes; claude mode sources it before exec) ───────
+# ── rc file (shared by both modes) ──────────────────────────────────────────
 RC_FILE="$(mktemp /tmp/sbox-rc-XXXXXX)"
 {
   echo 'export PS1="[sandbox:\w]\$ "'
@@ -99,7 +133,7 @@ RC_FILE="$(mktemp /tmp/sbox-rc-XXXXXX)"
   cat <<'RCEOF'
 alias ll='ls -la'
 RCEOF
-  if [ "$MODE" = "shell" ]; then
+  if [ "$CODER" = "shell" ]; then
     cat <<'RCEOF'
 echo ""
 echo "  [sandbox] $(pwd)"
@@ -130,15 +164,20 @@ BWRAP_BASE=(
   --bind "$SANDBOX_DIR" "$SANDBOX_DIR"
   --dir "$HOME"
   "${USER_BINDS[@]}"
+  "${CODER_BWRAP[@]}"
   "${CONDA_BWRAP[@]}"
-  # per-project claude overlays (must come after USER_BINDS to shadow ~/.claude)
-  --bind "$SANDBOX_DIR/.cache/claude" "$HOME/.cache/claude"
-  --bind "$HOME/.claude.json" "$HOME/.claude.json"
-  --bind "$SANDBOX_DIR/.claude/projects" "$HOME/.claude/projects"
-  --bind "$SANDBOX_DIR/.claude/session-env" "$HOME/.claude/session-env"
-  --bind "$SANDBOX_DIR/.claude/tasks" "$HOME/.claude/tasks"
+  "${PROJECT_BWRAP[@]}"
   --proc /proc
-  --dev /dev
+)
+
+# Minimal /dev — only essential devices instead of full /dev exposure
+BWRAP_BASE+=(--dir /dev)
+[ -d /dev/pts ] && BWRAP_BASE+=(--bind /dev/pts /dev/pts)
+for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
+  [ -e "$_d" ] && BWRAP_BASE+=(--bind "$_d" "$_d")
+done
+
+BWRAP_BASE+=(
   --tmpfs /tmp
   --tmpfs /run
   --bind "$RC_FILE" /tmp/sandbox-rc
@@ -146,14 +185,21 @@ BWRAP_BASE=(
   --die-with-parent
 )
 
-# /share is site-specific — bind RO if present
-[ -d /share ] && BWRAP_BASE+=(--ro-bind /share /share)
-
 # ── env passed to the sandboxed process ──────────────────────────────────────
-ANTHROPIC_ENV=()
-[ -n "${ANTHROPIC_BASE_URL:-}" ] && ANTHROPIC_ENV=(ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL")
+CODER_ENV=()
 
-# Build PATH from paths.conf PATH_EXTRA + conda + system dirs
+# Coder tunnel: read from paths.conf CODER_TUNNEL_<CODER> (uppercase key)
+_tunnel_upper="$(printf '%s' "$CODER" | tr '[:lower:]' '[:upper:]')"
+_tunnel_var="CODER_TUNNEL_${_tunnel_upper}"
+_tunnel_config="${!_tunnel_var:-}"
+if [ -n "$_tunnel_config" ]; then
+  _tunnel_host="${_tunnel_config%%=*}"
+  _tunnel_url="${_tunnel_config#*=}"
+  if [ "$(hostname)" = "$_tunnel_host" ]; then
+    CODER_ENV+=(ANTHROPIC_BASE_URL="$_tunnel_url")
+  fi
+fi
+
 _extra_path=""
 for _p in "${PATH_EXTRA[@]+"${PATH_EXTRA[@]}"}"; do
   _extra_path="${_extra_path}${_p}:"
@@ -169,18 +215,28 @@ ENV_BASE=(
   LC_ALL="C.UTF-8"
   TMPDIR=/tmp
   SANDBOX_DIR="$SANDBOX_DIR"
-  "${ANTHROPIC_ENV[@]}"
+  "${CODER_ENV[@]}"
   "${CONDA_ENV_VARS[@]}"
   PATH="${_extra_path}${CONDA_PATH_PREFIX}/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
 )
 
 # ── exec ─────────────────────────────────────────────────────────────────────
-if [ "$MODE" = "claude" ]; then
-  # non-interactive bash: source rc (for conda activation), then exec claude
+if [ "$CODER" != "shell" ]; then
+  # Write a wrapper script to avoid injecting CODER into bash -c string
+  WRAPPER="$(mktemp /tmp/sbox-wrap-XXXXXX)"
+  cat > "$WRAPPER" <<WRAPEOF
+#!/usr/bin/env bash
+source /tmp/sandbox-rc
+exec "$CODER" "\$@"
+WRAPEOF
+  chmod +x "$WRAPPER"
+  trap 'rm -f "$RC_FILE" "$WRAPPER"' EXIT INT TERM
+
+  # /tmp is a fresh tmpfs inside the sandbox, so the wrapper must be bound in
+  BWRAP_BASE+=(--ro-bind "$WRAPPER" /tmp/sandbox-wrap)
   exec bwrap "${BWRAP_BASE[@]}" /usr/bin/env -i "${ENV_BASE[@]}" \
-    /usr/bin/bash -c 'source /tmp/sandbox-rc; exec claude "$@"' bash "$@"
+    /tmp/sandbox-wrap "$@"
 fi
 
-# shell mode — interactive bash
 exec bwrap "${BWRAP_BASE[@]}" /usr/bin/env -i "${ENV_BASE[@]}" \
   /usr/bin/bash --rcfile /tmp/sandbox-rc

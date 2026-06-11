@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# claude — run Claude Code inside a sandbox restricted to the current directory.
-# Detects the host platform and dispatches to lib/macos.sh or lib/linux.sh.
-set -e
-
-# already inside a sandbox shell — just run claude directly
-if [ -n "$SANDBOX_DIR" ]; then
-  exec command claude "$@"
-fi
-
-SBOX_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
-export SBOX_ROOT
-
-case "$(uname -s)" in
-  Darwin) exec "$SBOX_ROOT/lib/macos.sh" claude "$@" ;;
-  Linux)  exec "$SBOX_ROOT/lib/linux.sh" claude "$@" ;;
-  *)      echo "sbox: unsupported platform: $(uname -s)" >&2; exit 1 ;;
-esac
+# Backward-compatible shim: `claude` invokes `aicode claude`.
+SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
+exec "$SCRIPT_DIR/aicode" claude "$@"

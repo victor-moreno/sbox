@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sbox — open a sandboxed shell in the current directory (no claude).
+# sbox — open a sandboxed shell in the current directory.
 # Detects the host platform and dispatches to lib/macos.sh or lib/linux.sh.
 set -e
 

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# aicode — run a coding assistant inside a sandbox restricted to the current directory.
+# Usage: aicode <coder> [args...]
+#   coder: claude, opencode, qwen, or any command-name on PATH
+set -e
+
+if [ $# -lt 1 ]; then
+  echo "aicode: usage: aicode <coder> [args...]" >&2
+  echo "  coders: claude, opencode, qwen, ..." >&2
+  exit 1
+fi
+
+CODER="$1"; shift
+
+# Validate coder name: only allow alphanumeric, hyphens, underscores
+if [[ ! "$CODER" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "aicode: invalid coder name '$CODER' (use only letters, digits, -, _)" >&2
+  exit 1
+fi
+
+# already inside a sandbox shell — just run the coder directly
+if [ -n "$SANDBOX_DIR" ]; then
+  exec command "$CODER" "$@"
+fi
+
+SBOX_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
+export SBOX_ROOT
+
+case "$(uname -s)" in
+  Darwin) exec "$SBOX_ROOT/lib/macos.sh" "$CODER" "$@" ;;
+  Linux)  exec "$SBOX_ROOT/lib/linux.sh" "$CODER" "$@" ;;
+  *)      echo "aicode: unsupported platform: $(uname -s)" >&2; exit 1 ;;
+esac

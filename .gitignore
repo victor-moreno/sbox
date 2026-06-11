@@ -1,0 +1,4 @@
+# per-project dirs created by the sandbox itself
+.claude/
+.cache/
+.qwen/
