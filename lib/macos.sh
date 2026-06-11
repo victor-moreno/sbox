@@ -97,11 +97,11 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
 
   # ancestors of the project dir must be stat-able or getcwd() and git's
   # repo discovery fail with EPERM in nested dirs (e.g. ~/Downloads/x).
-  # literal = the directory itself only; contents below stay denied.
+  # metadata only: stat works but listing entry names stays denied.
   _anc="$SANDBOX_DIR"
   while [[ "$_anc" != "/" ]]; do
     _anc="${_anc:h}"
-    printf '(allow file-read* (literal "%s"))\n' "$_anc"
+    printf '(allow file-read-metadata (literal "%s"))\n' "$_anc"
   done
 
   for p in "${RO[@]}"; do
