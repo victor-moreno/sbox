@@ -32,63 +32,48 @@ get_coder_paths() {
 }
 
 # ── per-project isolation ────────────────────────────────────────────────────
-# Uses CLAUDE_CONFIG_DIR (claude-code) to point claude at $SANDBOX_DIR/.<coder>
-# instead of ~/.<coder>. Global settings (CLAUDE.md, settings.json, commands,
-# agents, plugins, ...) are inherited via per-entry symlinks; projects/
-# session-env/tasks are real dirs under the project so they isolate per
-# project. Nothing in $HOME is mutated at runtime, so concurrent sbox
-# sessions in different terminals don't race on shared symlinks.
+# Replaces ~/.<coder>/projects, session-env, tasks, and ~/.cache/<coder> with
+# symlinks to per-project dirs under $PWD/.<coder>. This gives each project
+# its own conversation history. Originals are moved to a backup dir and put
+# back by the exit trap (cleanup below). The rest of ~/.<coder> (including
+# credentials) stays untouched, so API auth works normally inside the sandbox.
 ISOLATE=0
-CONFIG_DIR=""
+_BACKUP_DIR="$HOME/.$CODER.__sbox_backup"
 
-# Best-effort migration: undo legacy ~/.claude/{projects,session-env,tasks}
-# symlinks left by the older isolation scheme and restore originals from
-# its backup dir. Safe to call repeatedly.
-_legacy_restore() {
-  local _backup="$HOME/.$CODER.__sbox_backup" _subdir
+# Undo symlinks and restore backups. Also called before setup so state left
+# behind by a crashed run is recovered instead of nested into a new backup.
+_restore_isolate() {
+  local _subdir
   for _subdir in projects session-env tasks; do
     [[ -L "$HOME/.$CODER/$_subdir" ]] && rm -f "$HOME/.$CODER/$_subdir"
-    if [[ -e "$_backup/$_subdir" && ! -e "$HOME/.$CODER/$_subdir" ]]; then
-      mv "$_backup/$_subdir" "$HOME/.$CODER/$_subdir"
+    if [[ -e "$_BACKUP_DIR/$_subdir" && ! -e "$HOME/.$CODER/$_subdir" ]]; then
+      mv "$_BACKUP_DIR/$_subdir" "$HOME/.$CODER/$_subdir"
     fi
   done
   [[ -L "$HOME/.cache/$CODER" ]] && rm -f "$HOME/.cache/$CODER"
-  if [[ -e "$_backup/.cache_$CODER" && ! -e "$HOME/.cache/$CODER" ]]; then
-    mv "$_backup/.cache_$CODER" "$HOME/.cache/$CODER"
+  if [[ -e "$_BACKUP_DIR/.cache_$CODER" && ! -e "$HOME/.cache/$CODER" ]]; then
+    mv "$_BACKUP_DIR/.cache_$CODER" "$HOME/.cache/$CODER"
   fi
-  rmdir "$_backup" 2>/dev/null || true
+  rmdir "$_BACKUP_DIR" 2>/dev/null || true
 }
 
 if [[ "$CODER" != "shell" ]]; then
   # ${=..}: zsh needs explicit word-splitting of the space-separated list
   for _isolate_coder in ${=CODER_PROJECT_ISOLATION}; do
     [[ "$_isolate_coder" == "$CODER" ]] || continue
-    # Only claude is supported here (uses CLAUDE_CONFIG_DIR). Other coders
-    # would need their own equivalent env var.
-    [[ "$CODER" == "claude" ]] || continue
     ISOLATE=1
-    CONFIG_DIR="$SANDBOX_DIR/.$CODER"
-
-    _legacy_restore
-    mkdir -p "$HOME/.$CODER" "$CONFIG_DIR"
+    _restore_isolate   # recover leftovers from a crashed previous run
+    mkdir -p "$HOME/.$CODER" "$HOME/.cache" "$_BACKUP_DIR"
+    mkdir -p "$SANDBOX_DIR/.$CODER/projects" "$SANDBOX_DIR/.$CODER/session-env" \
+             "$SANDBOX_DIR/.$CODER/tasks" "$SANDBOX_DIR/.cache/$CODER"
     [ -f "$HOME/.$CODER.json" ] || echo '{}' > "$HOME/.$CODER.json"
 
-    # Mirror ~/.<coder> entries into CONFIG_DIR as symlinks so claude still
-    # sees global settings/CLAUDE.md/commands/plugins/etc. Per-project
-    # subdirs override the symlinks with real dirs below.
-    setopt local_options null_glob
-    for _item in "$HOME/.$CODER"/*(DN); do
-      _name="${_item:t}"
-      case "$_name" in
-        projects | session-env | tasks) continue ;;
-      esac
-      _link="$CONFIG_DIR/$_name"
-      [[ -L "$_link" ]] && rm -f "$_link"   # refresh in case target moved
-      [[ -e "$_link" ]] && continue          # don't clobber real entries
-      ln -s "$_item" "$_link"
+    for _subdir in projects session-env tasks; do
+      [[ -e "$HOME/.$CODER/$_subdir" ]] && mv "$HOME/.$CODER/$_subdir" "$_BACKUP_DIR/$_subdir"
+      ln -sfn "$SANDBOX_DIR/.$CODER/$_subdir" "$HOME/.$CODER/$_subdir"
     done
-
-    mkdir -p "$CONFIG_DIR/projects" "$CONFIG_DIR/session-env" "$CONFIG_DIR/tasks"
+    [[ -e "$HOME/.cache/$CODER" ]] && mv "$HOME/.cache/$CODER" "$_BACKUP_DIR/.cache_$CODER"
+    ln -sfn "$SANDBOX_DIR/.cache/$CODER" "$HOME/.cache/$CODER"
     break
   done
 fi
@@ -147,9 +132,13 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
     fi
   done
 
-  # per-project isolation: CONFIG_DIR lives under $SANDBOX_DIR, which is
-  # already RW. Symlinks inside it target $HOME/.<coder>/* which is RW via
-  # CODER_RW_PATHS above. No extra rules needed.
+  # per-project isolation: symlinks in ~/.<coder>/{projects,...} and
+  # ~/.cache/<coder> target $SANDBOX_DIR which is already RW; the real
+  # ~/.<coder> and ~/.cache/<coder> dirs need explicit RW coverage too.
+  if [[ "$ISOLATE" == 1 ]]; then
+    printf '(allow file-read* file-write* (subpath "%s"))\n' "$HOME/.$CODER"
+    printf '(allow file-read* file-write* (subpath "%s"))\n' "$HOME/.cache/$CODER"
+  fi
 
   # keychain access itself is granted via RW in paths.conf (~/Library/Keychains)
   echo "(allow mach-lookup (global-name \"com.apple.SecurityServer\"))"
@@ -162,6 +151,7 @@ ZDOT=""
 cleanup() {
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
+  [[ "$ISOLATE" == 1 ]] && _restore_isolate
   return 0
 }
 trap cleanup EXIT INT TERM
@@ -186,9 +176,10 @@ if [[ "$CODER" != "shell" ]]; then
 
   export SANDBOX_DIR
   [[ -n "$_CODER_TUNNEL_URL" ]] && export ANTHROPIC_BASE_URL="$_CODER_TUNNEL_URL"
-  [[ "$ISOLATE" == 1 && "$CODER" == "claude" ]] && export CLAUDE_CONFIG_DIR="$CONFIG_DIR"
 
-  # no exec: the EXIT trap must run afterwards to clean up the policy file.
+  # no exec: the EXIT trap must run afterwards to restore isolation symlinks.
+  # Ctrl-C is the coder's to handle; ignoring it here keeps the symlinks in
+  # place while the coder is still running.
   trap '' INT TERM
   sandbox-exec -f "$POLICY" "$CODER_BIN" "$@"
   exit $?

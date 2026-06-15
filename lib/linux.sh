@@ -52,36 +52,27 @@ if [ -n "$CONDA_BASE" ]; then
 fi
 
 # ── per-project isolation (if coder is listed in CODER_PROJECT_ISOLATION) ────
-# Points claude at $SANDBOX_DIR/.<coder> via CLAUDE_CONFIG_DIR (instead of
-# bind-mounting subdirs into ~/.<coder>). Global settings/CLAUDE.md/etc. are
-# inherited via per-entry symlinks; projects/session-env/tasks are real dirs
-# under the project. Avoids shared mutable state in $HOME so concurrent
-# sbox sessions in different terminals don't collide.
-ISOLATE=0
-CONFIG_DIR=""
+# Bind-mounts per-project dirs over ~/.<coder>/projects|session-env|tasks and
+# ~/.cache/<coder> so each project has its own conversation history. The rest
+# of ~/.<coder> (including credentials) remains the real HOME copy untouched,
+# so API auth works normally inside the sandbox.
+PROJECT_BWRAP=()
 if [ "$CODER" != "shell" ]; then
   for _isolate_coder in $CODER_PROJECT_ISOLATION; do
-    if [ "$_isolate_coder" = "$CODER" ] && [ "$CODER" = "claude" ]; then
-      ISOLATE=1
-      CONFIG_DIR="$SANDBOX_DIR/.$CODER"
-      mkdir -p "$HOME/.$CODER" "$CONFIG_DIR"
+    if [ "$_isolate_coder" = "$CODER" ]; then
+      mkdir -p "$HOME/.$CODER"
+      mkdir -p "$SANDBOX_DIR/.$CODER/projects"
+      mkdir -p "$SANDBOX_DIR/.$CODER/session-env"
+      mkdir -p "$SANDBOX_DIR/.$CODER/tasks"
+      mkdir -p "$SANDBOX_DIR/.cache/$CODER"
       [ -f "$HOME/.$CODER.json" ] || echo '{}' > "$HOME/.$CODER.json"
-
-      # Mirror ~/.<coder> entries as symlinks (skip per-project subdirs).
-      shopt -s nullglob dotglob
-      for _item in "$HOME/.$CODER"/*; do
-        _name="$(basename "$_item")"
-        case "$_name" in
-          projects | session-env | tasks) continue ;;
-        esac
-        _link="$CONFIG_DIR/$_name"
-        [ -L "$_link" ] && rm -f "$_link"
-        [ -e "$_link" ] && continue
-        ln -s "$_item" "$_link"
-      done
-      shopt -u nullglob dotglob
-
-      mkdir -p "$CONFIG_DIR/projects" "$CONFIG_DIR/session-env" "$CONFIG_DIR/tasks"
+      PROJECT_BWRAP=(
+        --bind "$SANDBOX_DIR/.cache/$CODER" "$HOME/.cache/$CODER"
+        --bind "$HOME/.$CODER.json" "$HOME/.$CODER.json"
+        --bind "$SANDBOX_DIR/.$CODER/projects" "$HOME/.$CODER/projects"
+        --bind "$SANDBOX_DIR/.$CODER/session-env" "$HOME/.$CODER/session-env"
+        --bind "$SANDBOX_DIR/.$CODER/tasks" "$HOME/.$CODER/tasks"
+      )
       break
     fi
   done
@@ -178,6 +169,7 @@ BWRAP_BASE=(
   "${USER_BINDS[@]}"
   "${CODER_BWRAP[@]}"
   "${CONDA_BWRAP[@]}"
+  "${PROJECT_BWRAP[@]}"
   --proc /proc
 )
 
@@ -185,7 +177,9 @@ BWRAP_BASE=(
 BWRAP_BASE+=(--dir /dev)
 [ -d /dev/pts ] && BWRAP_BASE+=(--bind /dev/pts /dev/pts)
 for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
-  [ -e "$_d" ] && BWRAP_BASE+=(--bind "$_d" "$_d")
+  # --dev-bind (not --bind) required for char devices: --bind sets MS_NODEV
+  # which blocks device file access on older kernels (e.g. 4.18).
+  [ -e "$_d" ] && BWRAP_BASE+=(--dev-bind "$_d" "$_d")
 done
 
 BWRAP_BASE+=(
@@ -209,10 +203,6 @@ if [ -n "$_tunnel_config" ]; then
   if [ "$(hostname)" = "$_tunnel_host" ]; then
     CODER_ENV+=(ANTHROPIC_BASE_URL="$_tunnel_url")
   fi
-fi
-
-if [ "$ISOLATE" = 1 ] && [ "$CODER" = "claude" ]; then
-  CODER_ENV+=(CLAUDE_CONFIG_DIR="$CONFIG_DIR")
 fi
 
 _extra_path=""
