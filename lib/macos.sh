@@ -171,8 +171,19 @@ ZDOT=""
 cleanup() {
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
-  # don't leave the OAuth token at rest in the project dir
-  [[ "$ISOLATE" == 1 ]] && rm -f "$CONFIG_DIR/.credentials.json"
+  # Persist any token refreshed/rotated during the session back to the Keychain
+  # before deleting the project-dir copy. Claude writes refreshed tokens to this
+  # file (not the Keychain) when CLAUDE_CONFIG_DIR is set; without this write-back
+  # the rotated refresh token is lost and the stale Keychain copy forces a
+  # re-login next launch. Then remove the file so the OAuth token isn't left at
+  # rest in the project dir.
+  if [[ "$ISOLATE" == 1 ]]; then
+    if [[ -s "$CONFIG_DIR/.credentials.json" ]]; then
+      security add-generic-password -U -s "Claude Code-credentials" \
+        -a "${USER:-$(whoami)}" -w "$(cat "$CONFIG_DIR/.credentials.json")" 2>/dev/null
+    fi
+    rm -f "$CONFIG_DIR/.credentials.json"
+  fi
   return 0
 }
 trap cleanup EXIT INT TERM
