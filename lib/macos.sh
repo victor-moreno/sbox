@@ -179,7 +179,11 @@ cleanup() {
   # rest in the project dir.
   if [[ "$ISOLATE" == 1 ]]; then
     if [[ -s "$CONFIG_DIR/.credentials.json" ]]; then
-      security add-generic-password -U -s "Claude Code-credentials" \
+      # -A: allow any app silent access. Without it the default ACL only
+      # trusts /usr/bin/security, so the claude binary itself can't read its
+      # own token back and silently mints a fresh throwaway keychain entry,
+      # forcing /login next launch.
+      security add-generic-password -U -A -s "Claude Code-credentials" \
         -a "${USER:-$(whoami)}" -w "$(cat "$CONFIG_DIR/.credentials.json")" 2>/dev/null
     fi
     rm -f "$CONFIG_DIR/.credentials.json"
