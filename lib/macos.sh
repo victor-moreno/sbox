@@ -39,8 +39,12 @@ get_coder_paths() {
 # (settings, CLAUDE.md, commands, agents, plugins, ...) is inherited via
 # symlinks; projects/session-env/tasks are real per-project dirs. With
 # CLAUDE_CONFIG_DIR set claude reads account state from $CONFIG_DIR/.<coder>.json
-# and credentials from $CONFIG_DIR/.credentials.json (a file, NOT the Keychain),
-# so both are provisioned from the real ~/.<coder>.json + Keychain at launch.
+# (symlinked to the shared ~/.<coder>.json). Credentials, however, are NOT kept
+# in $CONFIG_DIR/.credentials.json: on macOS claude migrates any seed file into
+# the Keychain under a config-dir-namespaced service name (Claude Code-
+# credentials-<sha256(CONFIG_DIR)[:8]>), deletes the plaintext file, and from
+# then on owns and refreshes that entry itself. We therefore seed it ONCE from
+# the main Keychain token (see below) and never round-trip it again.
 ISOLATE=0
 CONFIG_DIR=""
 _BACKUP_DIR="$HOME/.$CODER.__sbox_backup"
@@ -90,13 +94,21 @@ if [[ "$CODER" != "shell" ]]; then
     [[ -f "$HOME/.$CODER.json" ]] || echo '{}' > "$HOME/.$CODER.json"
     ln -sfn "$HOME/.$CODER.json" "$CONFIG_DIR/.$CODER.json"
 
-    # Credentials: export the current Keychain token into the config dir each
-    # launch (claude uses this file, not the Keychain, when CLAUDE_CONFIG_DIR set).
-    if security find-generic-password -s "Claude Code-credentials" -w \
-         > "$CONFIG_DIR/.credentials.json" 2>/dev/null; then
-      chmod 600 "$CONFIG_DIR/.credentials.json"
-    else
-      rm -f "$CONFIG_DIR/.credentials.json"
+    # Credentials: seed this project's Keychain entry ONCE from the main
+    # "Claude Code-credentials" token, for first-run convenience (no /login).
+    # claude migrates the seed file into its own config-dir-namespaced Keychain
+    # entry and then keeps it refreshed. Re-seeding on later launches would
+    # overwrite claude's freshly rotated token with a stale copy whose refresh
+    # token has already been invalidated, forcing repeated /login — so the
+    # .sbox-seeded marker makes this strictly one-shot per project.
+    if [[ ! -e "$CONFIG_DIR/.sbox-seeded" ]]; then
+      if security find-generic-password -s "Claude Code-credentials" -w \
+           > "$CONFIG_DIR/.credentials.json" 2>/dev/null; then
+        chmod 600 "$CONFIG_DIR/.credentials.json"
+      else
+        rm -f "$CONFIG_DIR/.credentials.json"
+      fi
+      : > "$CONFIG_DIR/.sbox-seeded"
     fi
     break
   done
@@ -171,23 +183,11 @@ ZDOT=""
 cleanup() {
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
-  # Persist any token refreshed/rotated during the session back to the Keychain
-  # before deleting the project-dir copy. Claude writes refreshed tokens to this
-  # file (not the Keychain) when CLAUDE_CONFIG_DIR is set; without this write-back
-  # the rotated refresh token is lost and the stale Keychain copy forces a
-  # re-login next launch. Then remove the file so the OAuth token isn't left at
-  # rest in the project dir.
-  if [[ "$ISOLATE" == 1 ]]; then
-    if [[ -s "$CONFIG_DIR/.credentials.json" ]]; then
-      # -A: allow any app silent access. Without it the default ACL only
-      # trusts /usr/bin/security, so the claude binary itself can't read its
-      # own token back and silently mints a fresh throwaway keychain entry,
-      # forcing /login next launch.
-      security add-generic-password -U -A -s "Claude Code-credentials" \
-        -a "${USER:-$(whoami)}" -w "$(cat "$CONFIG_DIR/.credentials.json")" 2>/dev/null
-    fi
-    rm -f "$CONFIG_DIR/.credentials.json"
-  fi
+  # claude migrates the seed file into its Keychain entry and deletes it, so
+  # there is normally nothing here. Remove any leftover plaintext token just in
+  # case so the OAuth token is never left at rest in the project dir. No
+  # write-back: claude owns the refreshed token in the Keychain (see launch).
+  [[ "$ISOLATE" == 1 ]] && rm -f "$CONFIG_DIR/.credentials.json"
   return 0
 }
 trap cleanup EXIT INT TERM
