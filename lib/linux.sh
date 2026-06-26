@@ -198,11 +198,8 @@ _tunnel_upper="$(printf '%s' "$CODER" | tr '[:lower:]' '[:upper:]')"
 _tunnel_var="CODER_TUNNEL_${_tunnel_upper}"
 _tunnel_config="${!_tunnel_var:-}"
 if [ -n "$_tunnel_config" ]; then
-  _tunnel_host="${_tunnel_config%%=*}"
   _tunnel_url="${_tunnel_config#*=}"
-  if [ "$(hostname)" = "$_tunnel_host" ]; then
-    CODER_ENV+=(ANTHROPIC_BASE_URL="$_tunnel_url")
-  fi
+  CODER_ENV+=(ANTHROPIC_BASE_URL="$_tunnel_url")
 fi
 
 _extra_path=""
