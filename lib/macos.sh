@@ -94,6 +94,25 @@ if [[ "$CODER" != "shell" ]]; then
     [[ -f "$HOME/.$CODER.json" ]] || echo '{}' > "$HOME/.$CODER.json"
     ln -sfn "$HOME/.$CODER.json" "$CONFIG_DIR/.$CODER.json"
 
+    # Pre-trust this workspace. Claude gates the global permissions.allow list
+    # behind a per-project-path trust flag, so every new folder otherwise prints
+    # "Ignoring N permissions.allow entries: workspace not trusted" until you
+    # accept the dialog there. The sandbox itself is the trust boundary, so any
+    # dir opened via sbox is trusted by construction. Runs pre-launch (claude not
+    # yet writing the file); keyed on the real path claude sees ($SANDBOX_DIR).
+    python3 - "$HOME/.$CODER.json" "$SANDBOX_DIR" <<'PY'
+import json, sys
+cfg, proj = sys.argv[1], sys.argv[2]
+try:
+    with open(cfg) as f: d = json.load(f)
+except Exception:
+    d = {}
+entry = d.setdefault("projects", {}).setdefault(proj, {})
+if entry.get("hasTrustDialogAccepted") is not True:
+    entry["hasTrustDialogAccepted"] = True
+    with open(cfg, "w") as f: json.dump(d, f, indent=2)
+PY
+
     # Credentials: seed this project's Keychain entry ONCE from the main
     # "Claude Code-credentials" token, for first-run convenience (no /login).
     # claude migrates the seed file into its own config-dir-namespaced Keychain
