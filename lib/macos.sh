@@ -222,6 +222,9 @@ if [[ -n "$_tunnel_config" ]]; then
     _CODER_TUNNEL_URL="$_tunnel_url"
   fi
 fi
+# clear any ANTHROPIC_BASE_URL inherited from the invoking shell so the
+# sandbox only ever sees it when paths.conf configures a tunnel for this host
+unset ANTHROPIC_BASE_URL
 
 # ── coder mode ───────────────────────────────────────────────────────────────
 if [[ "$CODER" != "shell" ]]; then
