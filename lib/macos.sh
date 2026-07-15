@@ -202,11 +202,27 @@ ZDOT=""
 cleanup() {
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
-  # claude migrates the seed file into its Keychain entry and deletes it, so
-  # there is normally nothing here. Remove any leftover plaintext token just in
-  # case so the OAuth token is never left at rest in the project dir. No
-  # write-back: claude owns the refreshed token in the Keychain (see launch).
-  [[ "$ISOLATE" == 1 ]] && rm -f "$CONFIG_DIR/.credentials.json"
+  # Refresh the shared seed entry from this project's freshly-rotated token.
+  # New projects seed .credentials.json from the main "Claude Code-credentials"
+  # Keychain entry (see launch). But claude then owns a per-project entry named
+  # "Claude Code-credentials-<sha256(CONFIG_DIR)[:8]>" and rotates its refresh
+  # token there — never writing back to the shared entry. Since refresh tokens
+  # are single-use, the first project to refresh invalidates the shared entry's
+  # token server-side, so every later new project seeds a dead token and hits
+  # /login. Copying this project's live token back on exit keeps the shared
+  # entry a valid seed source. (Reading claude's own entry may pop a one-time
+  # Keychain "allow" prompt; choose Always Allow.)
+  if [[ "$ISOLATE" == 1 ]]; then
+    local _hash _tok
+    _hash="$(printf '%s' "$CONFIG_DIR" | shasum -a 256 | cut -c1-8)"
+    if _tok="$(security find-generic-password -s "Claude Code-credentials-$_hash" -w 2>/dev/null)"; then
+      security add-generic-password -U -a "$USER" -s "Claude Code-credentials" -w "$_tok" 2>/dev/null || true
+    fi
+    # claude migrates the seed file into its Keychain entry and deletes it, so
+    # there is normally nothing here. Remove any leftover plaintext token just in
+    # case so the OAuth token is never left at rest in the project dir.
+    rm -f "$CONFIG_DIR/.credentials.json"
+  fi
   return 0
 }
 trap cleanup EXIT INT TERM
