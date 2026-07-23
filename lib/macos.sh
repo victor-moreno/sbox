@@ -64,6 +64,29 @@ if entry.get("hasTrustDialogAccepted") is not True:
 PY
 fi
 
+# Pi stores project trust decisions in ~/.pi/agent/trust.json keyed by the
+# canonical project path. Since the sandbox itself is the trust boundary here,
+# auto-trust the sandboxed working directory so pi can load project-local .pi
+# resources without prompting on every first launch inside a new folder.
+if [[ "$CODER" == "pi" ]] && command -v python3 >/dev/null 2>&1; then
+  mkdir -p "$HOME/.pi/agent"
+  python3 - "$HOME/.pi/agent/trust.json" "$SANDBOX_DIR" <<'PY'
+import json, os, sys
+cfg, proj = sys.argv[1], sys.argv[2]
+proj = os.path.realpath(proj)
+try:
+    with open(cfg) as f: d = json.load(f)
+except Exception:
+    d = {}
+if not isinstance(d, dict):
+    d = {}
+if d.get(proj) is not True:
+    d[proj] = True
+    with open(cfg, "w") as f: json.dump(dict(sorted(d.items())), f, indent=2)
+    with open(cfg, "a") as f: f.write("\n")
+PY
+fi
+
 # ── resolve coder-specific RW paths from paths.conf ──────────────────────────
 # After the isolation block, which may create ~/.<coder> and ~/.<coder>.json
 CODER_RW_PATHS=()

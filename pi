@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Backward-compatible shim: `pi` invokes `aicode pi`.
+# Resolve the symlink chain manually (BSD readlink has no -f): `cd .. && pwd -P`
+# alone only resolves symlinked directories, not a symlinked file like this one,
+# so a bare ~/.local/bin/pi -> .../sbox/pi symlink resolved to the wrong
+# SCRIPT_DIR (~/.local/bin) and looked for aicode next to it instead of in sbox/.
+SOURCE="${BASH_SOURCE[0]:-$0}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname -- "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname -- "$SOURCE")" && pwd)"
+exec "$SCRIPT_DIR/aicode" pi "$@"

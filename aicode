@@ -6,7 +6,7 @@ set -e
 
 if [ $# -lt 1 ]; then
   echo "aicode: usage: aicode <coder> [args...]" >&2
-  echo "  coders: claude, opencode, qwen, ..." >&2
+  echo "  coders: claude, pi, opencode, qwen, ..." >&2
   exit 1
 fi
 
