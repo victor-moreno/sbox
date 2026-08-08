@@ -97,12 +97,16 @@ if [[ "$CODER" != "shell" ]]; then
 fi
 
 # ── shared resources: opt-in per-project via symlink (see SHARED_RW in paths.conf) ─
+# Resolved via python3 rather than zsh's ${:A}, which needs stat access on
+# every ancestor of the target and silently returns the unresolved path
+# otherwise (observed for symlinks into ~/Downloads/claude while sandboxed).
+_realpath() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
 for entry in "$SANDBOX_DIR"/*(DN); do
   [[ -L "$entry" ]] || continue
-  target="${entry:A}"
+  target="$(_realpath "$entry")"
   for allowed in "${SHARED_RW[@]}"; do
     [[ -e "$allowed" ]] || continue
-    [[ "$target" == "${allowed:A}" ]] && RW+=("$allowed")
+    [[ "$target" == "$(_realpath "$allowed")" ]] && RW+=("$allowed")
   done
 done
 
