@@ -96,6 +96,16 @@ if [[ "$CODER" != "shell" ]]; then
   done < <(get_coder_paths "$CODER")
 fi
 
+# ── shared resources: opt-in per-project via symlink (see SHARED_RW in paths.conf) ─
+for entry in "$SANDBOX_DIR"/*(DN); do
+  [[ -L "$entry" ]] || continue
+  target="${entry:A}"
+  for allowed in "${SHARED_RW[@]}"; do
+    [[ -e "$allowed" ]] || continue
+    [[ "$target" == "${allowed:A}" ]] && RW+=("$allowed")
+  done
+done
+
 # ── build sandbox-exec policy ────────────────────────────────────────────────
 POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
 {

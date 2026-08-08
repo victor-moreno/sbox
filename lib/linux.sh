@@ -112,6 +112,19 @@ if [ "$CODER" != "shell" ]; then
   done < <(get_coder_paths "$CODER")
 fi
 
+# ── shared resources: opt-in per-project via symlink (see SHARED_RW in paths.conf) ─
+shopt -s nullglob dotglob
+for entry in "$SANDBOX_DIR"/*; do
+  [ -L "$entry" ] || continue
+  target="$(readlink -f -- "$entry" 2>/dev/null)" || continue
+  for allowed in "${SHARED_RW[@]}"; do
+    [ -e "$allowed" ] || continue
+    allowed_real="$(readlink -f -- "$allowed" 2>/dev/null)" || continue
+    [ "$target" = "$allowed_real" ] && RW+=("$allowed")
+  done
+done
+shopt -u dotglob
+
 # ── build --dir chain so every parent of SANDBOX_DIR exists inside the tmpfs ─
 DIR_CHAIN=()
 PART=""

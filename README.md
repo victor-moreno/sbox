@@ -23,6 +23,8 @@ sbox                 # interactive sandboxed shell
 ```
 paths.conf   define which paths the sandbox gets RO or RW
              CODER_RW_<coder> variables map coder → config dirs (RW)
+             SHARED_RW lists RW paths that are opt-in per project: a project
+             only gets one if it contains a symlink resolving to it
              CODER_PROJECT_ISOLATION sets coders with per-project history
              no changes to lib/* needed for new coders
 ```
