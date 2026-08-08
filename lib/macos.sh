@@ -97,18 +97,19 @@ if [[ "$CODER" != "shell" ]]; then
 fi
 
 # ── shared resources: opt-in per-project via symlink (see SHARED_RW in paths.conf) ─
+# Walks the whole project tree (pruning .git/node_modules/.venv, since a
+# symlink can live at any depth, e.g. tools/TTS), not just the top level.
 # Resolved via python3 rather than zsh's ${:A}, which needs stat access on
 # every ancestor of the target and silently returns the unresolved path
 # otherwise (observed for symlinks into ~/Downloads/claude while sandboxed).
 _realpath() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
-for entry in "$SANDBOX_DIR"/*(DN); do
-  [[ -L "$entry" ]] || continue
+while IFS= read -r entry; do
   target="$(_realpath "$entry")"
   for allowed in "${SHARED_RW[@]}"; do
     [[ -e "$allowed" ]] || continue
     [[ "$target" == "$(_realpath "$allowed")" ]] && RW+=("$allowed")
   done
-done
+done < <(find "$SANDBOX_DIR" \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
 
 # ── build sandbox-exec policy ────────────────────────────────────────────────
 POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
