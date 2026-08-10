@@ -97,19 +97,23 @@ if [[ "$CODER" != "shell" ]]; then
 fi
 
 # ── shared resources: opt-in per-project via symlink (see SHARED_RW in paths.conf) ─
-# Walks the whole project tree (pruning .git/node_modules/.venv, since a
-# symlink can live at any depth, e.g. tools/TTS), not just the top level.
+# Walks the project tree up to a few levels deep (pruning .git/node_modules/.venv,
+# since a symlink can live at any depth, e.g. tools/TTS), not just the top level.
+# Skipped entirely when SHARED_RW is empty, and depth-capped otherwise, since an
+# unbounded walk is slow in projects with many descendants.
 # Resolved via python3 rather than zsh's ${:A}, which needs stat access on
 # every ancestor of the target and silently returns the unresolved path
 # otherwise (observed for symlinks into ~/Downloads/claude while sandboxed).
-_realpath() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
-while IFS= read -r entry; do
-  target="$(_realpath "$entry")"
-  for allowed in "${SHARED_RW[@]}"; do
-    [[ -e "$allowed" ]] || continue
-    [[ "$target" == "$(_realpath "$allowed")" ]] && RW+=("$allowed")
-  done
-done < <(find "$SANDBOX_DIR" \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
+if (( ${#SHARED_RW[@]} > 0 )); then
+  _realpath() { python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"; }
+  while IFS= read -r entry; do
+    target="$(_realpath "$entry")"
+    for allowed in "${SHARED_RW[@]}"; do
+      [[ -e "$allowed" ]] || continue
+      [[ "$target" == "$(_realpath "$allowed")" ]] && RW+=("$allowed")
+    done
+  done < <(find "$SANDBOX_DIR" -maxdepth 4 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
+fi
 
 # ── build sandbox-exec policy ────────────────────────────────────────────────
 POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"

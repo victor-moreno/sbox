@@ -113,16 +113,20 @@ if [ "$CODER" != "shell" ]; then
 fi
 
 # ── shared resources: opt-in per-project via symlink (see SHARED_RW in paths.conf) ─
-# Walks the whole project tree (pruning .git/node_modules/.venv, since a
-# symlink can live at any depth, e.g. tools/TTS), not just the top level.
-while IFS= read -r entry; do
-  target="$(readlink -f -- "$entry" 2>/dev/null)" || continue
-  for allowed in "${SHARED_RW[@]}"; do
-    [ -e "$allowed" ] || continue
-    allowed_real="$(readlink -f -- "$allowed" 2>/dev/null)" || continue
-    [ "$target" = "$allowed_real" ] && RW+=("$allowed")
-  done
-done < <(find "$SANDBOX_DIR" \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
+# Walks the project tree up to a few levels deep (pruning .git/node_modules/.venv,
+# since a symlink can live at any depth, e.g. tools/TTS), not just the top level.
+# Skipped entirely when SHARED_RW is empty, and depth-capped otherwise, since an
+# unbounded walk is slow in projects with many descendants.
+if [ "${#SHARED_RW[@]}" -gt 0 ]; then
+  while IFS= read -r entry; do
+    target="$(readlink -f -- "$entry" 2>/dev/null)" || continue
+    for allowed in "${SHARED_RW[@]}"; do
+      [ -e "$allowed" ] || continue
+      allowed_real="$(readlink -f -- "$allowed" 2>/dev/null)" || continue
+      [ "$target" = "$allowed_real" ] && RW+=("$allowed")
+    done
+  done < <(find "$SANDBOX_DIR" -maxdepth 4 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
+fi
 
 # ── build --dir chain so every parent of SANDBOX_DIR exists inside the tmpfs ─
 DIR_CHAIN=()
