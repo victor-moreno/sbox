@@ -11,13 +11,15 @@
 # Read+write inside sandbox (applies to all coders)
 RW=(
   "/tmp"
-  "private/tmp"
   "$HOME/.cache"
   "$HOME/.config"
-  "$HOME/Library/Keychains"   # macOS: coder credential storage
-  "$HOME/Library/Application Support/jamovi/modules"
   "$HOME/.npm"
   "$HOME/R"
+  "$HOME/.local/share/claude/versions/" # claude update
+  "$HOME/.local/state/claude/"
+  "$HOME/ondemand/data/sys/dashboard"   # link ondemand dev folder
+  "$HOME/app"
+  "$HOME/ondemand/dev/"
 )
 
 # Shared resources: RW, but opt-in per-project instead of global.
@@ -35,18 +37,18 @@ RW=(
 SHARED_RW=(
   "$HOME/Downloads/claude/TTS"
   "$HOME/Downloads/claude/jamovi"
+  "/scratch/models"
+  "/shared/projects/AI/ollama/models"
 )
 
 # Read-only inside sandbox (applies to all coders)
 RO=(
-  "$HOME/bin"
-  "$HOME/vic/vm/sync/bin"
+#  "$HOME/bin"
   "$HOME/.local"
   "$HOME/.claude/CLAUDE.md"
   "$HOME/.gitconfig"
   "$HOME/.gitignore_global"
   "$HOME/.Rprofile"
-  "$HOME/Library"
   "/share"                    # Linux cluster software (skipped elsewhere)
 )
 
@@ -72,16 +74,3 @@ PATH_EXTRA=(
   "$HOME/.local/python3/bin"
 )
 
-# Python virtualenv activate script sourced at shell startup (leave empty to
-# skip). macOS shell mode only; on Linux the conda env is activated instead.
-PYTHON_VENV="$HOME/.local/python3/bin/activate"
-
-# History file for the sandboxed shell. Leave empty to disable.
-# On Linux it must live under a RW entry (e.g. "$HOME/.cache/sandbox_history").
-SANDBOX_HISTFILE=""
-
-# Coder tunnel configuration.
-# Format: CODER_TUNNEL_<codername>="<hostname>=<url>"
-# The env var ANTHROPIC_BASE_URL (or coder-specific equivalent) is set when
-# the machine hostname matches.
-#CODER_TUNNEL_CLAUDE="mmini-ICO.local=http://localhost:8443"
