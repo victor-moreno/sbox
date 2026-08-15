@@ -3,3 +3,6 @@
 .cache/
 .qwen/
 .tmp/
+
+# keep paths specific to linux/mac
+paths.conf
