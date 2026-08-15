@@ -208,12 +208,16 @@ BWRAP_BASE=(
   --symlink usr/lib64 /lib64
   --symlink usr/sbin /sbin
   --ro-bind /opt /opt
-  --bind "$SANDBOX_DIR" "$SANDBOX_DIR"
   --dir "$HOME"
   "${USER_BINDS[@]}"
   "${CODER_BWRAP[@]}"
   "${CONDA_BWRAP[@]}"
   "${PROJECT_BWRAP[@]}"
+  # Bound last so it always wins RW, even when SANDBOX_DIR sits inside an RO
+  # path from paths.conf (e.g. this repo lives under $HOME/bin, which is RO):
+  # bwrap's ro-bind recursively remounts read-only, so binding SANDBOX_DIR
+  # first let a later RO ancestor bind shadow it back to read-only.
+  --bind "$SANDBOX_DIR" "$SANDBOX_DIR"
   --proc /proc
 )
 
