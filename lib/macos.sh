@@ -112,7 +112,7 @@ if (( ${#SHARED_RW[@]} > 0 )); then
       [[ -e "$allowed" ]] || continue
       [[ "$target" == "$(_realpath "$allowed")" ]] && RW+=("$allowed")
     done
-  done < <(find "$SANDBOX_DIR" -maxdepth 4 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
+  done < <(find "$SANDBOX_DIR" -maxdepth 2 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
 fi
 
 # ── build sandbox-exec policy ────────────────────────────────────────────────

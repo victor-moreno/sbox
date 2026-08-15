@@ -125,7 +125,7 @@ if [ "${#SHARED_RW[@]}" -gt 0 ]; then
       allowed_real="$(readlink -f -- "$allowed" 2>/dev/null)" || continue
       [ "$target" = "$allowed_real" ] && RW+=("$allowed")
     done
-  done < <(find "$SANDBOX_DIR" -maxdepth 4 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
+  done < <(find "$SANDBOX_DIR" -maxdepth 2 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
 fi
 
 # ── build --dir chain so every parent of SANDBOX_DIR exists inside the tmpfs ─
