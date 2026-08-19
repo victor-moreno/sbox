@@ -110,7 +110,10 @@ if (( ${#SHARED_RW[@]} > 0 )); then
     target="$(_realpath "$entry")"
     for allowed in "${SHARED_RW[@]}"; do
       [[ -e "$allowed" ]] || continue
-      [[ "$target" == "$(_realpath "$allowed")" ]] && RW+=("$allowed")
+      allowed_real="$(_realpath "$allowed")"
+      # match the shared path itself or anything under it, since a symlink
+      # may point deeper (e.g. jamovi/jamovi-src inside a shared jamovi dir)
+      [[ "$target" == "$allowed_real" || "$target" == "$allowed_real"/* ]] && RW+=("$allowed")
     done
   done < <(find "$SANDBOX_DIR" -maxdepth 2 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
 fi
