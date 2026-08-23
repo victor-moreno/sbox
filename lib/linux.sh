@@ -221,11 +221,6 @@ BWRAP_BASE=(
   "${CODER_BWRAP[@]}"
   "${CONDA_BWRAP[@]}"
   "${PROJECT_BWRAP[@]}"
-  # Bound last so it always wins RW, even when SANDBOX_DIR sits inside an RO
-  # path from paths.conf (e.g. this repo lives under $HOME/bin, which is RO):
-  # bwrap's ro-bind recursively remounts read-only, so binding SANDBOX_DIR
-  # first let a later RO ancestor bind shadow it back to read-only.
-  --bind "$SANDBOX_DIR" "$SANDBOX_DIR"
   --proc /proc
 )
 
@@ -241,6 +236,15 @@ done
 BWRAP_BASE+=(
   --tmpfs /tmp
   --tmpfs /run
+  # SANDBOX_DIR bound last (after /tmp and /run are remounted, and after every
+  # other bind above) so it always wins RW: bwrap remounts recursively, so an
+  # earlier SANDBOX_DIR bind would get shadowed back by a later mount over
+  # one of its ancestors — an RO path from paths.conf (e.g. this repo lives
+  # under $HOME/bin, which is RO), or the private tmpfs /tmp above when a
+  # project dir sits under /tmp.
+  --bind "$SANDBOX_DIR" "$SANDBOX_DIR"
+  # Bound after SANDBOX_DIR so this stays visible even in the edge case where
+  # SANDBOX_DIR is /tmp itself (which would otherwise shadow it).
   --bind "$RC_FILE" /tmp/sandbox-rc
   --chdir "$SANDBOX_DIR"
   --die-with-parent
