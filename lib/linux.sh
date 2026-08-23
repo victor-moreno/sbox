@@ -158,6 +158,10 @@ CONDA_BWRAP=()
 CONDA_ENV_VARS=()
 CONDA_PATH_PREFIX=""
 if [ -n "$CONDA_BASE" ]; then
+  # This ro-bind runs after USER_BINDS/CODER_BWRAP, and --ro-bind recursively
+  # remounts read-only, so any RW path added later under $HOME/.conda (e.g.
+  # via paths.conf's RW array) would get silently clamped back to read-only
+  # — same ordering hazard as the SANDBOX_DIR bind below.
   [ -d "$HOME/.conda" ] && CONDA_BWRAP+=(--ro-bind "$HOME/.conda" "$HOME/.conda")
   CONDA_ENV_VARS=(
     CONDA_EXE="$CONDA_BASE/bin/conda"
@@ -199,6 +203,10 @@ trap 'rm -f "$RC_FILE"' EXIT INT TERM
 
 # ── bwrap mount layout ───────────────────────────────────────────────────────
 BWRAP_BASE=(
+  # Without this, the sandbox shares the host PID namespace: every host
+  # process is visible under /proc (leaking other processes' cmdlines) and
+  # signalable (e.g. kill -0 succeeds against host PIDs owned by this user).
+  --unshare-pid
   --tmpfs /
   "${DIR_CHAIN[@]}"
   --ro-bind /usr /usr
