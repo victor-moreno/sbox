@@ -203,12 +203,12 @@ if [[ "$CODER" != "shell" ]]; then
   [[ -n "$_CODER_TUNNEL_URL" ]] && export ANTHROPIC_BASE_URL="$_CODER_TUNNEL_URL"
 
   # Per-instance isolation for opencode via XDG dirs
-  # Keep config and modules shared, isolate only per-project data/state
+  # Keep config and modules shared, isolate only per-project data to avoid sqlite corruption
   if [[ "$CODER" == "opencode" ]]; then
     OPK_ROOT="$SANDBOX_DIR/.opencode"
-    OPK_STATE="$OPK_ROOT/state"
-    mkdir -p "$OPK_STATE"
-    export XDG_STATE_HOME="$OPK_STATE"
+    OPK_DATA="$OPK_ROOT/data"
+    mkdir -p "$OPK_DATA"
+    export XDG_DATA_HOME="$OPK_DATA"
   fi
 
   # no exec: the EXIT trap must run afterwards to delete the policy temp file.
