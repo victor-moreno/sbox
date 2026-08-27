@@ -254,16 +254,13 @@ BWRAP_BASE+=(
 CODER_ENV=()
 
 # Per-instance isolation for opencode via XDG dirs
+# Keep config and modules shared, isolate only per-project data/state
 if [ "$CODER" = "opencode" ]; then
   OPK_ROOT="$SANDBOX_DIR/.opencode"
-  OPK_DATA="$OPK_ROOT/data"
   OPK_STATE="$OPK_ROOT/state"
-  OPK_CONFIG="$OPK_ROOT/config"
-  mkdir -p "$OPK_DATA" "$OPK_STATE" "$OPK_CONFIG"
+  mkdir -p "$OPK_STATE"
   CODER_ENV+=(
-    XDG_DATA_HOME="$OPK_DATA"
     XDG_STATE_HOME="$OPK_STATE"
-    XDG_CONFIG_HOME="$OPK_CONFIG"
   )
 fi
 
