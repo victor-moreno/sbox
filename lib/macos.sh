@@ -202,6 +202,18 @@ if [[ "$CODER" != "shell" ]]; then
   export SANDBOX_DIR
   [[ -n "$_CODER_TUNNEL_URL" ]] && export ANTHROPIC_BASE_URL="$_CODER_TUNNEL_URL"
 
+  # Per-instance isolation for opencode via XDG dirs
+  if [[ "$CODER" == "opencode" ]]; then
+    OPK_ROOT="$SANDBOX_DIR/.opencode"
+    OPK_DATA="$OPK_ROOT/data"
+    OPK_STATE="$OPK_ROOT/state"
+    OPK_CONFIG="$OPK_ROOT/config"
+    mkdir -p "$OPK_DATA" "$OPK_STATE" "$OPK_CONFIG"
+    export XDG_DATA_HOME="$OPK_DATA"
+    export XDG_STATE_HOME="$OPK_STATE"
+    export XDG_CONFIG_HOME="$OPK_CONFIG"
+  fi
+
   # no exec: the EXIT trap must run afterwards to delete the policy temp file.
   # Ctrl-C is the coder's to handle; ignoring it here keeps cleanup deferred
   # until the coder itself exits.
