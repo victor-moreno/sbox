@@ -7,3 +7,6 @@
 
 # keep paths specific to linux/mac
 paths.conf
+
+# local symlink, not part of the repo
+TTS
