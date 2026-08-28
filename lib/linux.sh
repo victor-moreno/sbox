@@ -236,6 +236,23 @@ done
 BWRAP_BASE+=(
   --tmpfs /tmp
   --tmpfs /run
+)
+
+# Slurm/munge (optional): sbatch reads configless config from /run/slurm/conf
+# and authenticates via the munge socket at /var/run/munge (a symlink to /run
+# on the host). Both live under /run, which is a private empty tmpfs above —
+# bind them back in, and recreate the /var/run -> /run symlink, so job
+# submission works the same as outside the sandbox.
+[ -d /run/slurm/conf ] && BWRAP_BASE+=(--ro-bind /run/slurm/conf /run/slurm/conf)
+if [ -d /run/munge ]; then
+  BWRAP_BASE+=(
+    --ro-bind /run/munge /run/munge
+    --dir /var
+    --symlink /run /var/run
+  )
+fi
+
+BWRAP_BASE+=(
   # SANDBOX_DIR bound last (after /tmp and /run are remounted, and after every
   # other bind above) so it always wins RW: bwrap remounts recursively, so an
   # earlier SANDBOX_DIR bind would get shadowed back by a later mount over
