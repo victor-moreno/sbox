@@ -87,6 +87,32 @@ if d.get(proj) is not True:
 PY
 fi
 
+# ── opencode per-project isolation (computed early: needed by the policy below) ─
+# Keep config and modules shared, isolate data/state per project to avoid sqlite
+# corruption. opencode also treats $SANDBOX_DIR/.opencode (same dir as OPK_ROOT)
+# as a project-local plugin dir and, on every real start, reinstalls its own
+# copy of @opencode-ai/plugin + deps there (~65M) unless node_modules already
+# exists there — see lib/linux.sh for the same issue on Linux, where it's
+# solved with a read-only bind-mount. sandbox-exec has no bind-mount
+# equivalent, so here a real symlink points OPK_ROOT/node_modules at the
+# shared global copy, and the policy rules below deny deleting/replacing the
+# symlink itself and deny writing through it into the real shared directory.
+# Unlike the Linux fix, this hasn't been verified against a real
+# `sandbox-exec` run — only reasoned from Seatbelt's documented last-rule-wins
+# evaluation (also relied on elsewhere in this policy, e.g. the per-path
+# allows carved out of the blanket $HOME deny below).
+OPK_ROOT="" OPK_GLOBAL_NODE_MODULES=""
+if [[ "$CODER" == "opencode" ]]; then
+  OPK_ROOT="$SANDBOX_DIR/.opencode"
+  OPK_DATA="$OPK_ROOT/data"
+  OPK_STATE="$OPK_ROOT/state"
+  mkdir -p "$OPK_DATA" "$OPK_STATE"
+  if [[ -d "$HOME/.config/opencode/node_modules" ]]; then
+    OPK_GLOBAL_NODE_MODULES="$HOME/.config/opencode/node_modules"
+    [[ -e "$OPK_ROOT/node_modules" ]] || ln -s "$OPK_GLOBAL_NODE_MODULES" "$OPK_ROOT/node_modules"
+  fi
+fi
+
 # ── resolve coder-specific RW paths from paths.conf ──────────────────────────
 # After the isolation block, which may create ~/.<coder> and ~/.<coder>.json
 CODER_RW_PATHS=()
@@ -163,6 +189,15 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
     fi
   done
 
+  # opencode: protect the shared node_modules from the per-project reinstall
+  # (see comment above the OPK_ROOT block). Placed after the RW loop above so
+  # these deny rules win over the blanket $HOME/.config allow.
+  if [[ -n "$OPK_GLOBAL_NODE_MODULES" ]]; then
+    printf '(deny file-write* (literal "%s"))\n' "$OPK_ROOT/node_modules"
+    printf '(allow file-read* (subpath "%s"))\n' "$OPK_GLOBAL_NODE_MODULES"
+    printf '(deny file-write* (subpath "%s"))\n' "$OPK_GLOBAL_NODE_MODULES"
+  fi
+
   # keychain access itself is granted via RW in paths.conf (~/Library/Keychains)
   echo "(allow mach-lookup (global-name \"com.apple.SecurityServer\"))"
 
@@ -202,13 +237,9 @@ if [[ "$CODER" != "shell" ]]; then
   export SANDBOX_DIR
   [[ -n "$_CODER_TUNNEL_URL" ]] && export ANTHROPIC_BASE_URL="$_CODER_TUNNEL_URL"
 
-  # Per-instance isolation for opencode via XDG dirs
-  # Keep config and modules shared, isolate data/state per project to avoid sqlite corruption
+  # opencode XDG dirs: OPK_ROOT/DATA/STATE were computed earlier, before the
+  # policy was built (see OPK_ROOT block above).
   if [[ "$CODER" == "opencode" ]]; then
-    OPK_ROOT="$SANDBOX_DIR/.opencode"
-    OPK_DATA="$OPK_ROOT/data"
-    OPK_STATE="$OPK_ROOT/state"
-    mkdir -p "$OPK_DATA" "$OPK_STATE"
     export XDG_DATA_HOME="$OPK_DATA"
     export XDG_STATE_HOME="$OPK_STATE"
   fi
