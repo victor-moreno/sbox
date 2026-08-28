@@ -271,12 +271,20 @@ BWRAP_BASE+=(
 CODER_ENV=()
 
 # Per-instance isolation for opencode via XDG dirs
-# Keep config and modules shared, isolate data/state per project to avoid sqlite corruption
+# Keep config and modules shared, isolate data/state per project to avoid sqlite corruption.
+# opencode also treats $SANDBOX_DIR/.opencode (same dir as OPK_ROOT) as a
+# project-local plugin dir and, on every real TUI/run start, unconditionally
+# deletes and reinstalls its own copy of @opencode-ai/plugin + deps there
+# (~65M) — a plain symlink doesn't stop this, since unlink() only needs write
+# permission on the containing directory, not the link itself. Bind-mount the
+# shared global copy read-only instead, so opencode physically can't remove it
+# (mounted after SANDBOX_DIR above, so it wins and stays RO).
 if [ "$CODER" = "opencode" ]; then
   OPK_ROOT="$SANDBOX_DIR/.opencode"
   OPK_DATA="$OPK_ROOT/data"
   OPK_STATE="$OPK_ROOT/state"
   mkdir -p "$OPK_DATA" "$OPK_STATE"
+  [ -d "$HOME/.config/opencode/node_modules" ] && BWRAP_BASE+=(--ro-bind "$HOME/.config/opencode/node_modules" "$OPK_ROOT/node_modules")
   CODER_ENV+=(
     XDG_DATA_HOME="$OPK_DATA"
     XDG_STATE_HOME="$OPK_STATE"

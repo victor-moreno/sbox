@@ -2,6 +2,7 @@
 .claude/
 .cache/
 .qwen/
+.opencode/
 .tmp/
 
 # keep paths specific to linux/mac
