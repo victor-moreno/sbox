@@ -60,6 +60,7 @@ CODER_RW_CLAUDE="$(printf '%s\n%s\n' "$HOME/.claude" "$HOME/.claude.json")"
 CODER_RW_PI="$HOME/.pi"
 CODER_RW_QWEN="$HOME/.qwen"
 CODER_RW_OPENCODE="$(printf '%s\n%s\n' "$HOME/.local/share/opencode" "$HOME/.local/state/opencode")"
+CODER_RW_HERMES="$HOME/.hermes"
 
 # Per-project isolation: coders whose conversation history is isolated per project.
 # Linux only (bind-mounts). macOS ignores this: claude already namespaces history

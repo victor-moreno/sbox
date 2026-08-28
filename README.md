@@ -15,6 +15,7 @@ alias claude='$DIR/claude'   # backward compat: same as `aicode claude`
 # Usage
 aicode claude        # Claude Code in a sandbox
 aicode opencode      # OpenCode in a sandbox
+aicode hermes        # Hermes Agent in a sandbox
 aicode qwen          # Qwen Code in a sandbox
 aicode <any-cmd>     # any command on PATH or in homebrew
 sbox                 # interactive sandboxed shell
