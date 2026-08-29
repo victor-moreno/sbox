@@ -327,6 +327,9 @@ ENV_BASE=(
 if [ "$CODER" != "shell" ]; then
   # Write a wrapper script to avoid injecting CODER into bash -c string
   WRAPPER="$(mktemp /tmp/sbox-wrap-XXXXXX)"
+  # Unquoted heredoc expands $CODER now (validated name, safe), but $@ must
+  # reach the wrapper verbatim or it expands here and all extra args bake
+  # into one word (observed: aicode hermes --model x --message y collapsed).
   cat > "$WRAPPER" <<WRAPEOF
 #!/usr/bin/env bash
 source /tmp/sandbox-rc
