@@ -1,5 +1,60 @@
 #!/usr/bin/env bash
-# Backward-compatible shim: `hermes` invokes `aicode hermes`.
+# hermes-project — auto-select a Hermes profile from the launch folder.
+#
+# Mapping: git toplevel of cwd (or cwd itself when not in a repo) ->
+# "<sanitized basename>-<8-hex hash of the physical path>" -> profile name.
+# The path hash makes names unique per folder (same basename in two
+# directories -> two profiles) and dodges reserved names like 'test'.
+# The hash is over the *physical* (symlink-resolved) path, so launching
+# through a symlink reuses the profile of the real folder.
+# Legacy: if a profile with the old plain-basename name already exists
+# for this folder, it is kept (no orphaning of earlier installs).
+#
+# First run in a folder asks to create a profile (config.yaml/.env/SOUL.md
+# hardlinked from default) or to run the default profile.
+#
+# Skills are CURATED: only the SKILL_WHITELIST below is hardlinked into
+# the profile (on every launch — add a skill to the list, it appears at
+# your next launch; no profile surgery). Everything else stays out, so
+# the agent's skill surface stays small for everyday coding.
+
+# Skills seeded into each project profile, as paths relative to
+# <default>/skills/ (use "category/skill-name"; a "category" copies the
+# whole category). Edit freely.
+SKILL_WHITELIST=(
+  autonomous-ai-agents/hermes-agent          # required: Hermes core skill
+  software-development/plan
+  software-development/systematic-debugging
+  software-development/test-driven-development
+  software-development/python-debugpyA
+  software-development/requesting-code-review
+  software-development/spike
+  github/codebase-inspection
+  github/github-auth
+  github/github-code-review
+  github/github-issue-to-pr
+  github/github-issues
+  github/github-pr-workflow
+  github/github-repo-management
+  repo-gap-audit
+  note-taking/obsidian
+  productivity/docx
+  productivity/xlsx
+  productivity/powerpoint
+  productivity/pdf
+  productivity/med1-jamovi-videos
+  productivity/ocr-and-documents  
+  productivity/session-librarian
+  repo-gap-audit/references
+  research/research-paper-writing
+  research/grounded-citations
+)
+
+#
+# Note: after renaming/moving a project the hash changes, so a new profile
+# is offered. Keep the old one by answering 'd' and deleting it by hand.
+set -euo pipefail
+
 SOURCE="${BASH_SOURCE[0]:-$0}"
 while [ -h "$SOURCE" ]; do
   DIR="$(cd -P "$(dirname -- "$SOURCE")" && pwd)"
@@ -7,4 +62,119 @@ while [ -h "$SOURCE" ]; do
   [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
 done
 SCRIPT_DIR="$(cd -P "$(dirname -- "$SOURCE")" && pwd)"
-exec "$SCRIPT_DIR/aicode" hermes "$@"
+
+HERMES_HOME_DIR="${HERMES_HOME:-$HOME/.hermes}"
+# Guard: a parent hermes session exports HERMES_HOME, and it points at that
+# session's *profile home* (~/.hermes/profiles/<name>), not the profiles
+# root. Using it here would create the new profile (via hermes, which
+# ignores the env var) at the right place, then hardlink/sync it into
+# $HERMES_HOME_DIR/profiles/ → <profile home>/profiles/<new> → fails and
+# aborts under set -e. Only a path ending in /profiles is a valid root.
+case "$HERMES_HOME_DIR" in
+  */profiles) ;;
+  */profiles/*) HERMES_HOME_DIR="${HERMES_HOME_DIR%/profiles/*}" ;;
+  *) HERMES_HOME_DIR="$HOME/.hermes" ;;
+esac
+REAL_HERMES="${HERMES_BIN:-$HOME/.local/bin/hermes}"
+# All chat launches go through the sbox wrapper (sandboxed: $PWD rw,
+# ~/.hermes rw). hermes-sbox is the sibling shim: `aicode hermes "$@"`.
+SBOX_HERMES="$SCRIPT_DIR/hermes-sbox"
+
+# Only chat entry points honor the project profile; admin/other subcommands
+# (profile, gateway, config, model, sessions, ...) pass through untouched.
+# Switch targets: bare `hermes`, flag-first, or the `chat` subcommand.
+first="${1-}"
+is_chat=0
+case "$first" in
+  ""|"chat"|"-"*) : ;;                 # switch-profile case
+  *) is_chat=1 ;;                       # some other subcommand
+esac
+if [ "$is_chat" = 1 ]; then
+  exec "$SBOX_HERMES" "$@"
+fi
+
+create_profile() {
+  local name="$1" dflt="$HERMES_HOME_DIR" pdir="$HERMES_HOME_DIR/profiles/$1" f
+  echo "Creating profile '$name'..."
+  "$REAL_HERMES" profile create "$name" --no-alias --no-skills
+  # Hardlink the shared files from default. Hermes rewrites these via atomic
+  # replace (tmp + os.replace), which breaks the link safely on first edit,
+  # so per-profile drift is impossible to leak across profiles.
+  # if-form (not '[ -f ] && ln'): a missing source would be the last command
+  # of the function, returning 1 and tripping set -e mid-creation.
+  for f in config.yaml .env SOUL.md; do
+    if [ -f "$dflt/$f" ]; then
+      ln -f "$dflt/$f" "$pdir/$f"
+    fi
+  done
+  # Note: 'hermes profile create' pre-creates skills/ (and seeds the
+  # essential bundled skills there even with --no-skills). sync_skills()
+  # wipes it and fills it from the whitelist right after, so no special
+  # handling is needed here.
+  echo "Profile '$name' ready — memory & sessions isolated, config + skills hardlinked from default."
+  return 0
+}
+
+# Fill <profile>/skills from SKILL_WHITELIST, run on EVERY launch so that
+# editing the list takes effect at the next launch without profile surgery.
+# The profile's skills dir is treated as fully list-managed: anything not in
+# the whitelist is removed (including skills installed by hand into the
+# profile — add them to SKILL_WHITELIST to keep them).
+sync_skills() {
+  local name="$1" dflt="$HERMES_HOME_DIR" pdir="$HERMES_HOME_DIR/profiles/$1" rel d
+  [ -d "$dflt/skills" ] || return 0
+  mkdir -p "$pdir/skills"
+  find "$pdir/skills" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  for rel in "${SKILL_WHITELIST[@]}"; do
+    # Hardlink copy, keeping the default home's category layout
+    # (a bare "category" entry copies the whole category).
+    [ -e "$dflt/skills/$rel" ] || continue
+    d="$(dirname "$rel")"
+    [ "$d" = "." ] && d=""
+    mkdir -p "$pdir/skills/$d"
+    # cp -rl exits 1 with "are identical (not copied)" when the target is
+    # already hardlinked to the source (a re-run after an interrupted first
+    # sync). That is a success state, not an error — let it pass; a real
+    # failure is reported but does not abort the whole sync.
+    cp -rl "$dflt/skills/$rel" "$pdir/skills/$d/" 2>&1 | grep -v "are identical (not copied)" || true
+  done
+  return 0
+}
+
+root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Physical path: symlinks to the same repo must map to the same profile.
+root="$(cd -P "$root" && pwd)"
+# Sanitized basename + 8-hex hash of the physical path.
+base="$(basename "$root" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+if [ -z "$base" ]; then
+  base="p"
+fi
+hash8="$(printf '%s' "$root" | shasum -a 1 | cut -c1-8)"
+# Cap the base so the full name stays within the 64-char profile limit.
+base="${base:0:55}"
+name="$base-$hash8"
+# The -<8hex> suffix guarantees uniqueness per physical path and keeps the
+# name clear of reserved words ('test', 'tmp', 'root', ...) — a name like
+# 'test-7e28be1c' is not itself reserved and is a valid profile id.
+# Legacy: an install that predates the hash naming created a plain
+# basename profile for this folder — keep using it instead of orphaning it.
+profiles_dir="$HERMES_HOME_DIR/profiles"
+if [ -n "$base" ] && [ ! -d "$profiles_dir/$name" ] && [ -d "$profiles_dir/$base" ]; then
+  name="$base"
+fi
+
+if [ ! -d "$profiles_dir/$name" ]; then
+  if [ -t 0 ]; then
+    printf 'No Hermes profile for %s\nCreate a "%s" profile? [C]reate / [d]efault: ' "$root" "$name"
+    IFS= read -r ans || ans="c"
+    case "$ans" in
+      d*|D*) exec "$SBOX_HERMES" "$@" ;;
+    esac
+  fi
+  create_profile "$name"
+fi
+
+# Keep the profile's skills in sync with SKILL_WHITELIST on every launch.
+sync_skills "$name"
+
+exec "$SBOX_HERMES" -p "$name" "$@"
