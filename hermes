@@ -97,21 +97,35 @@ create_profile() {
   local name="$1" dflt="$HERMES_HOME_DIR" pdir="$HERMES_HOME_DIR/profiles/$1" f
   echo "Creating profile '$name'..."
   "$REAL_HERMES" profile create "$name" --no-alias --no-skills
-  # Hardlink the shared files from default. Hermes rewrites these via atomic
-  # replace (tmp + os.replace), which breaks the link safely on first edit,
-  # so per-profile drift is impossible to leak across profiles.
+  # Symlink the shared files from default. Using symlinks (not hardlinks)
+  # because hermes rewrites these via atomic replace (tmp + os.replace):
+  # a hardlink would be orphaned when the inode is swapped out, breaking
+  # all other profiles.  A symlink always resolves to the same path and
+  # finds the new file after replacement.
   # if-form (not '[ -f ] && ln'): a missing source would be the last command
   # of the function, returning 1 and tripping set -e mid-creation.
   for f in config.yaml .env SOUL.md; do
     if [ -f "$dflt/$f" ]; then
-      ln -f "$dflt/$f" "$pdir/$f"
+      ln -sf "$dflt/$f" "$pdir/$f"
     fi
   done
+  # Set display_name from the folder basename (strip the -<8hex> hash).
+  # Only do this for project profiles (names ending in -<8hex>); skip
+  # 'default', 'custom', and legacy plain-basename profiles.
+  if [[ $name == *-???????? ]]; then
+    local base="${name%-????????}"
+    "$PY" - "$REPO" "$name" "$base" <<'PYEOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from hermes_cli import profiles  # noqa: E402
+profiles.set_profile_display_name(sys.argv[2], sys.argv[3])
+PYEOF
+  fi
   # Note: 'hermes profile create' pre-creates skills/ (and seeds the
   # essential bundled skills there even with --no-skills). sync_skills()
   # wipes it and fills it from the whitelist right after, so no special
   # handling is needed here.
-  echo "Profile '$name' ready — memory & sessions isolated, config + skills hardlinked from default."
+  echo "Profile '$name' ready — memory & sessions isolated, config + skills symlinked from default."
   return 0
 }
 
