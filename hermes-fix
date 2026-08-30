@@ -228,14 +228,11 @@ if failures:
 print("  all source patches in place")
 PYEOF
 
-echo "== 5. display_name for THIS folder's project profile (from \$PWD)"
-# Use $PWD (where the user ran the script) rather than $DIR (where the script lives),
-# so running hermes-fix from ~/Downloads/claude/alice-fisica sets the display_name
-# for *that* folder's profile, not for the sbox profile.
-CWD="${PWD:-$(pwd)}"
-"$PY" - "$REPO" "$CWD" <<'PYEOF'
-import hashlib
-import subprocess
+echo "== 5. display_name for ALL existing project profiles"
+# Derive display_name from each profile's own name (strip the -<8hex> hash).
+# This is run after an update when all profiles exist, so we set all of them.
+"$PY" - "$REPO" <<'PYEOF'
+import re
 import sys
 from pathlib import Path
 
@@ -243,27 +240,29 @@ repo = Path(sys.argv[1])
 sys.path.insert(0, str(repo))
 from hermes_cli import profiles  # noqa: E402
 
-# Same mapping as the ./hermes launcher: git toplevel (or the dir itself) ->
-# "<sanitized basename>-<sha1(physical path)[:8]>". The hash is the per-folder
-# disambiguation key — never drop it.
-try:
-    root = subprocess.check_output(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=sys.argv[2], stderr=subprocess.DEVNULL, text=True,
-    ).strip()
-except Exception:
-    root = sys.argv[2]
-root = str(Path(root).resolve())
-base = "".join(c if c.isalnum() or c == "-" else "-" for c in Path(root).name.lower())
-base = base.strip("-") or "p"
-name = f"{base[:55]}-{hashlib.sha1(root.encode()).hexdigest()[:8]}"
-
-pdir = profiles.get_profile_dir(name)
-if not pdir.is_dir():
-    print(f"  · no profile for {name} yet — nothing to do (launcher creates it)")
+profiles_dir = Path(repo).parent / "profiles"
+if not profiles_dir.is_dir():
+    print(f"  · profiles dir not found — skipped")
     sys.exit(0)
-dn = profiles.set_profile_display_name(name, base)
-print(f"  ✓ {name} → display_name '{dn}'")
+
+hash_pat = re.compile(r"-[0-9a-f]{8}$")
+count = 0
+for pdir in sorted(profiles_dir.iterdir()):
+    if not pdir.is_dir() or pdir.name.startswith("."):
+        continue
+    name = pdir.name
+    # Strip the -<8hex> suffix to get the original folder basename (display name).
+    base = hash_pat.sub("", name, count=1)
+    if base == name:
+        # Not a hashed project profile (e.g. "default") — skip.
+        continue
+    dn = profiles.set_profile_display_name(name, base)
+    print(f"  ✓ {name} → display_name '{dn}'")
+    count += 1
+if count == 0:
+    print(f"  · no hashed project profiles found — nothing to do")
+else:
+    print(f"  {count} profile(s) updated")
 PYEOF
 
 echo "== 6. rebuild TUI bundle"
