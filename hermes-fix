@@ -228,9 +228,12 @@ if failures:
 print("  all source patches in place")
 PYEOF
 
-echo "== 5. display_name for this folder's project profile"
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
-"$PY" - "$REPO" "$DIR" <<'PYEOF'
+echo "== 5. display_name for THIS folder's project profile (from \$PWD)"
+# Use $PWD (where the user ran the script) rather than $DIR (where the script lives),
+# so running hermes-fix from ~/Downloads/claude/alice-fisica sets the display_name
+# for *that* folder's profile, not for the sbox profile.
+CWD="${PWD:-$(pwd)}"
+"$PY" - "$REPO" "$CWD" <<'PYEOF'
 import hashlib
 import subprocess
 import sys
