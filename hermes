@@ -95,6 +95,9 @@ fi
 
 create_profile() {
   local name="$1" dflt="$HERMES_HOME_DIR" pdir="$HERMES_HOME_DIR/profiles/$1" f
+  # Hardcoded paths: PY and REPO are not exported by the hermes bootstrap.
+  local py="$HOME/.hermes/hermes-agent/venv/bin/python"
+  local repo="$HOME/.hermes/hermes-agent"
   echo "Creating profile '$name'..."
   "$REAL_HERMES" profile create "$name" --no-alias --no-skills
   # Symlink the shared files from default. Using symlinks (not hardlinks)
@@ -114,7 +117,7 @@ create_profile() {
   # 'default', 'custom', and legacy plain-basename profiles.
   if [[ $name == *-???????? ]]; then
     local base="${name%-????????}"
-    "$PY" - "$REPO" "$name" "$base" <<'PYEOF'
+    "$py" - "$repo" "$name" "$base" <<'PYEOF'
 import sys
 sys.path.insert(0, sys.argv[1])
 from hermes_cli import profiles  # noqa: E402

@@ -10,3 +10,7 @@ paths.conf
 
 # local symlink, not part of the repo
 TTS
+
+
+# hermes
+hermes-sbox
