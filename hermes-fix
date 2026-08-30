@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+# hermes-fix — re-apply local hermes-agent patches after a `hermes update`.
+#
+# A `hermes update` re-pulls the source at ~/.hermes/hermes-agent and can
+# drop these local changes. Run this from anywhere; it is idempotent
+# (each hunk is applied once, then skipped on re-runs):
+#
+#   1. hermes_cli/profiles.py  — 'hermes profile list'/'show' crashed with
+#      an uncaught PermissionError when ~/.local/bin held an unstat-able
+#      entry (broken symlink, TCC-protected path). Catch OSError, skip.
+#   2. hermes_cli/profiles.py  — add get_profile_display_name()
+#      (presentation-only lookup, canonical id untouched).
+#   3. tui_gateway/server.py + methods_session.py — send
+#      profile_display_name in session.info payloads.
+#   4. ui-tui (types.ts, appLayout.tsx) — the TUI composer prompt prefix
+#      shows the display name (e.g. 'sbox') instead of the hashed id
+#      (sbox-2d61140e), then rebuild dist/entry.js.
+#   5. Re-assert display_name on THIS folder's project profile
+#      (derived exactly like the ./hermes launcher: base + sha1(path)[:8]).
+#
+# After running: restart the TUI for the prompt prefix to change.
+
+set -euo pipefail
+
+REPO="${HERMES_AGENT_DIR:-$HOME/.hermes/hermes-agent}"
+[ -d "$REPO" ] || { echo "✗ hermes-agent dir not found at $REPO" >&2; exit 1; }
+PY="$REPO/venv/bin/python"; [ -x "$PY" ] || PY=python3
+
+echo "== 1-4. Python + TUI source patches ($REPO)"
+"$PY" - "$REPO" <<'PYEOF'
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+failures = []
+
+# (file, old, new, marker) — marker ⊂ new; hunk skipped when marker present.
+HUNKS = [
+    # 1. build_alias_map: skip unstat-able entries in the wrapper dir
+    (
+        "hermes_cli/profiles.py",
+        """    for entry in sorted(wrapper_dir.iterdir()):
+        if not entry.is_file():
+            continue
+""",
+        """    for entry in sorted(wrapper_dir.iterdir()):
+        try:
+            if not entry.is_file():
+                continue
+        except OSError:
+            # Unstat-able entry: broken symlink to an inaccessible target, a
+            # TCC-protected path, or similar. Not one of our wrappers — skip.
+            continue
+""",
+        "Unstat-able entry",
+    ),
+    # 2. get_profile_display_name() after format_profile_label()
+    (
+        "hermes_cli/profiles.py",
+        """    dn = (display_name or "").strip()
+    return f"{dn} ({name})" if dn and dn != name else name
+""",
+        """    dn = (display_name or "").strip()
+    return f"{dn} ({name})" if dn and dn != name else name
+
+
+def get_profile_display_name(profile_name: str) -> str:
+    \"\"\"Return *profile_name*'s display name, falling back to the id itself.
+
+    Presentation-only: the canonical id (directory name, launcher ``-p`` arg,
+    per-folder disambiguation hash) is never altered here. Never raises — an
+    unreadable profile.yaml just means "no display name".
+    \"\"\"
+    try:
+        canon = normalize_profile_name(profile_name)
+    except ValueError:
+        return profile_name
+    if canon in ("default", "custom"):
+        return canon
+    try:
+        dn = read_profile_meta(get_profile_dir(canon)).get("display_name", "")
+    except Exception:
+        dn = ""
+    return dn or canon
+""",
+        "def get_profile_display_name",
+    ),
+    # 3a. server.py: display-name helper after _current_profile_name()
+    (
+        "tui_gateway/server.py",
+        """def _current_profile_name() -> str:
+    try:
+        from hermes_cli.profiles import get_active_profile_name
+
+        return get_active_profile_name() or "default"
+    except Exception:
+        return "default"
+""",
+        """def _current_profile_name() -> str:
+    try:
+        from hermes_cli.profiles import get_active_profile_name
+
+        return get_active_profile_name() or "default"
+    except Exception:
+        return "default"
+
+
+def _response_profile_display_name(profile: str | None = None) -> str:
+    \"\"\"Presentation-only display name for the profile *profile* resolves to.
+
+    Mirrors :func:`_response_profile_name` but returns the profile's
+    ``display_name`` (from profile.yaml) when set, so surfaces can show a
+    short human label (e.g. ``sbox``) instead of the canonical id
+    (``sbox-2d61140e``). Falls back to the id — never raises.
+    \"\"\"
+    try:
+        from hermes_cli.profiles import get_profile_display_name
+
+        return get_profile_display_name(_response_profile_name(profile))
+    except Exception:
+        return _response_profile_name(profile)
+""",
+        "def _response_profile_display_name",
+    ),
+    # 3b. server.py: main session.info payload
+    (
+        "tui_gateway/server.py",
+        """        )
+        if isinstance(session, dict) and session.get("profile_home")
+        else _current_profile_name(),
+    }
+""",
+        """        )
+        if isinstance(session, dict) and session.get("profile_home")
+        else _current_profile_name(),
+        "profile_display_name": _response_profile_display_name(
+            Path(session["profile_home"]).name
+            if isinstance(session, dict) and session.get("profile_home")
+            else None
+        ),
+    }
+""",
+        '"profile_display_name": _response_profile_display_name(\n            Path(session["profile_home"]).name',
+    ),
+    # 3c. server.py: _lazy_resume_info payload
+    (
+        "tui_gateway/server.py",
+        """        "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+        "profile_name": _response_profile_name(profile),
+    }
+""",
+        """        "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+        "profile_name": _response_profile_name(profile),
+        "profile_display_name": _response_profile_display_name(profile),
+    }
+""",
+        '"profile_name": _response_profile_name(profile),\n        "profile_display_name": _response_profile_display_name(profile),\n    }',
+    ),
+    # 3d. methods_session.py: session.create immediate info
+    (
+        "tui_gateway/methods_session.py",
+        """                "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+                "profile_name": _response_profile_name(profile),
+            },
+""",
+        """                "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+                "profile_name": _response_profile_name(profile),
+                "profile_display_name": _response_profile_display_name(profile),
+            },
+""",
+        '"profile_display_name": _response_profile_display_name(profile),\n            },',
+    ),
+    # 4a. TUI types: SessionInfo field
+    (
+        "ui-tui/src/types.ts",
+        """  model: string
+  profile_name?: string
+""",
+        """  model: string
+  profile_display_name?: string
+  profile_name?: string
+""",
+        "profile_display_name?: string",
+    ),
+    # 4b. TUI composer prompt prefix prefers the display name
+    (
+        "ui-tui/src/components/appLayout.tsx",
+        """  const promptText = composerPromptText(
+    ui.theme.brand.prompt,
+    ui.info?.profile_name,
+""",
+        """  // Prompt prefix: prefer the profile's display name (presentation-only,
+  // e.g. "sbox") over the canonical id ("sbox-2d61140e"). The id stays the
+  // source of truth for routing/comparison; this is purely what the user sees.
+  const profileName = ui.info?.profile_display_name || ui.info?.profile_name
+  const promptText = composerPromptText(
+    ui.theme.brand.prompt,
+    profileName,
+""",
+        "const profileName = ui.info?.profile_display_name",
+    ),
+]
+
+for rel, old, new, marker in HUNKS:
+    path = repo / rel
+    if not path.is_file():
+        failures.append(f"{rel}: file missing")
+        print(f"  ✗ {rel}: file missing")
+        continue
+    text = path.read_text(encoding="utf-8")
+    if marker in text:
+        print(f"  ✓ {rel}: already applied")
+        continue
+    if old not in text:
+        failures.append(f"{rel}: anchor not found (upstream changed?)")
+        print(f"  ✗ {rel}: anchor not found — upstream code changed, "
+              f"apply this hunk by hand:")
+        print("    --- expect ---")
+        for line in old.strip().splitlines():
+            print(f"    {line}")
+        continue
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    print(f"  ✓ {rel}: patched")
+
+if failures:
+    print(f"\n{len(failures)} hunk(s) could not be applied automatically.")
+    sys.exit(1)
+print("  all source patches in place")
+PYEOF
+
+echo "== 5. display_name for this folder's project profile"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
+"$PY" - "$REPO" "$DIR" <<'PYEOF'
+import hashlib
+import subprocess
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+sys.path.insert(0, str(repo))
+from hermes_cli import profiles  # noqa: E402
+
+# Same mapping as the ./hermes launcher: git toplevel (or the dir itself) ->
+# "<sanitized basename>-<sha1(physical path)[:8]>". The hash is the per-folder
+# disambiguation key — never drop it.
+try:
+    root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=sys.argv[2], stderr=subprocess.DEVNULL, text=True,
+    ).strip()
+except Exception:
+    root = sys.argv[2]
+root = str(Path(root).resolve())
+base = "".join(c if c.isalnum() or c == "-" else "-" for c in Path(root).name.lower())
+base = base.strip("-") or "p"
+name = f"{base[:55]}-{hashlib.sha1(root.encode()).hexdigest()[:8]}"
+
+pdir = profiles.get_profile_dir(name)
+if not pdir.is_dir():
+    print(f"  · no profile for {name} yet — nothing to do (launcher creates it)")
+    sys.exit(0)
+dn = profiles.set_profile_display_name(name, base)
+print(f"  ✓ {name} → display_name '{dn}'")
+PYEOF
+
+echo "== 6. rebuild TUI bundle"
+if command -v npm >/dev/null 2>&1 && [ -d "$REPO/ui-tui" ]; then
+    (cd "$REPO/ui-tui" && npm run build >/dev/null) \
+        && echo "  ✓ dist/entry.js rebuilt (restart the TUI to pick it up)" \
+        || echo "  ✗ TUI build failed — run: cd $REPO/ui-tui && npm run build"
+else
+    echo "  · npm or ui-tui/ not available — skipped"
+fi
+
+echo
+echo "done. Restart the TUI if you want the prompt prefix to show the short name."
