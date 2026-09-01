@@ -140,21 +140,40 @@ PYEOF
 sync_skills() {
   local name="$1" dflt="$HERMES_HOME_DIR" pdir="$HERMES_HOME_DIR/profiles/$1" rel d
   [ -d "$dflt/skills" ] || return 0
+
+  # Skip the rebuild entirely when the whitelist hasn't changed since the
+  # last launch — the loop below is cheap per-entry now (symlinks, not
+  # recursive copies) but still not free across ~20+ entries every start.
+  local stamp="$pdir/.skills-whitelist-hash" fp
+  fp="$(printf '%s\n' "${SKILL_WHITELIST[@]}" | shasum -a 1 | cut -d' ' -f1)"
+  if [ -d "$pdir/skills" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$fp" ]; then
+    return 0
+  fi
+
   mkdir -p "$pdir/skills"
   find "$pdir/skills" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   for rel in "${SKILL_WHITELIST[@]}"; do
-    # Hardlink copy, keeping the default home's category layout
-    # (a bare "category" entry copies the whole category).
+    # Symlink (not hardlink-copy), same treatment as config.yaml/.env/
+    # SOUL.md: keeps the default home's category layout (a bare "category"
+    # entry exposes the whole category), avoids walking every file in each
+    # whitelisted skill tree on every launch, and skill edits made in
+    # $dflt/skills show up live with no resync needed.
     [ -e "$dflt/skills/$rel" ] || continue
     d="$(dirname "$rel")"
     [ "$d" = "." ] && d=""
+    # If an ancestor of this entry was already whitelisted as a whole
+    # category (e.g. "repo-gap-audit" before "repo-gap-audit/references"),
+    # $pdir/skills/$d is already a symlink into $dflt/skills — resolving
+    # through it here would mkdir/ln inside the *shared* tree instead of
+    # the profile. The ancestor symlink already exposes this entry, so
+    # just skip it.
+    if [ -n "$d" ] && [ -L "$pdir/skills/$d" ]; then
+      continue
+    fi
     mkdir -p "$pdir/skills/$d"
-    # cp -rl exits 1 with "are identical (not copied)" when the target is
-    # already hardlinked to the source (a re-run after an interrupted first
-    # sync). That is a success state, not an error — let it pass; a real
-    # failure is reported but does not abort the whole sync.
-    cp -rl "$dflt/skills/$rel" "$pdir/skills/$d/" 2>&1 | grep -v "are identical (not copied)" || true
+    ln -sfn "$dflt/skills/$rel" "$pdir/skills/$rel"
   done
+  printf '%s' "$fp" > "$stamp"
   return 0
 }
 
