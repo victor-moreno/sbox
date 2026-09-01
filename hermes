@@ -188,10 +188,25 @@ fi
 
 if [ ! -d "$profiles_dir/$name" ]; then
   if [ -t 0 ]; then
-    printf 'No Hermes profile for %s\nCreate a "%s" profile? [C]reate / [d]efault: ' "$root" "$name"
+    printf 'No Hermes profile for %s\nCreate a "%s" profile? [C]reate / [d]efault / [t]emp: ' "$root" "$name"
     IFS= read -r ans || ans="c"
     case "$ans" in
       d*|D*) exec "$SBOX_HERMES" "$@" ;;
+      t*|T*)
+        # Temporary profile: unique per launch, removed on exit.
+        # No `exec` here: exec would replace this shell (and its trap) with
+        # hermes-sbox before it even runs, so cleanup would never fire, and
+        # falling out of the case without an explicit exit would drop into
+        # the create_profile call below and recreate a folder-named profile.
+        tmp_name="tmp-$$-$(head -c4 /dev/urandom | shasum -a 1 | cut -c1-8)"
+        create_profile "$tmp_name"
+        trap 'rm -rf "$profiles_dir/$tmp_name" 2>/dev/null' EXIT
+        set +e
+        "$SBOX_HERMES" -p "$tmp_name" "$@"
+        rc=$?
+        set -e
+        exit "$rc"
+        ;;
     esac
   fi
   create_profile "$name"
