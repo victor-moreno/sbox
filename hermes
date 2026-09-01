@@ -19,6 +19,26 @@
 #
 # Note: after renaming/moving a project the hash changes, so a new profile
 # is offered. Keep the old one by answering 'd' and deleting it by hand.
+
+# Plain files that are the same for every profile, symlinked from the
+# default home rather than duplicated. auth.lock rides along with
+# auth.json: its path is derived independently (get_hermes_home() /
+# "auth.lock"), so leaving it as a real per-profile file would flock a
+# different file per profile while writing the same shared auth.json —
+# no actual mutual exclusion across profiles. Edit freely.
+SHARED_FILES=(
+  config.yaml
+  .env
+  SOUL.md
+  auth.json
+  auth.lock
+  models_dev_cache.json
+  models_dev_cache.etag
+  provider_models_cache.json
+  ollama_cloud_models_cache.json
+  tui-theme-boot.json
+)
+
 set -euo pipefail
 
 SOURCE="${BASH_SOURCE[0]:-$0}"
@@ -73,7 +93,7 @@ create_profile() {
   # finds the new file after replacement.
   # if-form (not '[ -f ] && ln'): a missing source would be the last command
   # of the function, returning 1 and tripping set -e mid-creation.
-  for f in config.yaml .env SOUL.md; do
+  for f in "${SHARED_FILES[@]}"; do
     if [ -f "$dflt/$f" ]; then
       ln -sf "$dflt/$f" "$pdir/$f"
     fi
@@ -157,10 +177,16 @@ if [ ! -d "$profiles_dir/$name" ]; then
 fi
 
 # Migrate profiles from an earlier hermes version (per-skill hardlinks or
-# symlinks) to the shared whole-folder symlink. Cheap no-op once migrated.
+# symlinks, real per-profile copies of SHARED_FILES) to the shared
+# symlinks. Cheap no-op once migrated.
 if [ -d "$HERMES_HOME_DIR/skills" ] && [ ! -L "$profiles_dir/$name/skills" ]; then
   rm -rf "$profiles_dir/$name/skills"
   ln -s "$HERMES_HOME_DIR/skills" "$profiles_dir/$name/skills"
 fi
+for f in "${SHARED_FILES[@]}"; do
+  if [ -f "$HERMES_HOME_DIR/$f" ] && [ ! -L "$profiles_dir/$name/$f" ]; then
+    ln -sf "$HERMES_HOME_DIR/$f" "$profiles_dir/$name/$f"
+  fi
+done
 
 exec "$SBOX_HERMES" -p "$name" "$@"
