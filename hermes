@@ -13,43 +13,9 @@
 # First run in a folder asks to create a profile (config.yaml/.env/SOUL.md
 # hardlinked from default) or to run the default profile.
 #
-# Skills are CURATED: only the SKILL_WHITELIST below is hardlinked into
-# the profile (on every launch — add a skill to the list, it appears at
-# your next launch; no profile surgery). Everything else stays out, so
-# the agent's skill surface stays small for everyday coding.
-
-# Skills seeded into each project profile, as paths relative to
-# <default>/skills/ (use "category/skill-name"; a "category" copies the
-# whole category). Edit freely.
-SKILL_WHITELIST=(
-  autonomous-ai-agents/hermes-agent          # required: Hermes core skill
-  software-development/plan
-  software-development/systematic-debugging
-  software-development/test-driven-development
-  software-development/python-debugpyA
-  software-development/requesting-code-review
-  software-development/spike
-  github/codebase-inspection
-  github/github-auth
-  github/github-code-review
-  github/github-issue-to-pr
-  github/github-issues
-  github/github-pr-workflow
-  github/github-repo-management
-  repo-gap-audit
-  note-taking/obsidian
-  productivity/docx
-  productivity/xlsx
-  productivity/powerpoint
-  productivity/pdf
-  productivity/med1-jamovi-videos
-  productivity/ocr-and-documents  
-  productivity/session-librarian
-  repo-gap-audit/references
-  research/research-paper-writing
-  research/grounded-citations
-)
-
+# Skills are SHARED: <profile>/skills is a single symlink to
+# <default>/skills (same treatment as config.yaml/.env/SOUL.md) — every
+# profile sees every skill, always current, no per-profile copy/sync step.
 #
 # Note: after renaming/moving a project the hash changes, so a new profile
 # is offered. Keep the old one by answering 'd' and deleting it by hand.
@@ -112,6 +78,14 @@ create_profile() {
       ln -sf "$dflt/$f" "$pdir/$f"
     fi
   done
+  # Skills: symlink the whole folder rather than per-file, shared across
+  # all profiles. 'hermes profile create' pre-seeds skills/ as a real
+  # directory even with --no-skills; rm it first since ln -s on an
+  # existing real directory nests a link inside it instead of replacing it.
+  if [ -d "$dflt/skills" ]; then
+    rm -rf "$pdir/skills"
+    ln -s "$dflt/skills" "$pdir/skills"
+  fi
   # Set display_name from the folder basename (strip the -<8hex> hash).
   # Only do this for project profiles (names ending in -<8hex>); skip
   # 'default', 'custom', and legacy plain-basename profiles.
@@ -124,56 +98,7 @@ from hermes_cli import profiles  # noqa: E402
 profiles.set_profile_display_name(sys.argv[2], sys.argv[3])
 PYEOF
   fi
-  # Note: 'hermes profile create' pre-creates skills/ (and seeds the
-  # essential bundled skills there even with --no-skills). sync_skills()
-  # wipes it and fills it from the whitelist right after, so no special
-  # handling is needed here.
   echo "Profile '$name' ready — memory & sessions isolated, config + skills symlinked from default."
-  return 0
-}
-
-# Fill <profile>/skills from SKILL_WHITELIST, run on EVERY launch so that
-# editing the list takes effect at the next launch without profile surgery.
-# The profile's skills dir is treated as fully list-managed: anything not in
-# the whitelist is removed (including skills installed by hand into the
-# profile — add them to SKILL_WHITELIST to keep them).
-sync_skills() {
-  local name="$1" dflt="$HERMES_HOME_DIR" pdir="$HERMES_HOME_DIR/profiles/$1" rel d
-  [ -d "$dflt/skills" ] || return 0
-
-  # Skip the rebuild entirely when the whitelist hasn't changed since the
-  # last launch — the loop below is cheap per-entry now (symlinks, not
-  # recursive copies) but still not free across ~20+ entries every start.
-  local stamp="$pdir/.skills-whitelist-hash" fp
-  fp="$(printf '%s\n' "${SKILL_WHITELIST[@]}" | shasum -a 1 | cut -d' ' -f1)"
-  if [ -d "$pdir/skills" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$fp" ]; then
-    return 0
-  fi
-
-  mkdir -p "$pdir/skills"
-  find "$pdir/skills" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  for rel in "${SKILL_WHITELIST[@]}"; do
-    # Symlink (not hardlink-copy), same treatment as config.yaml/.env/
-    # SOUL.md: keeps the default home's category layout (a bare "category"
-    # entry exposes the whole category), avoids walking every file in each
-    # whitelisted skill tree on every launch, and skill edits made in
-    # $dflt/skills show up live with no resync needed.
-    [ -e "$dflt/skills/$rel" ] || continue
-    d="$(dirname "$rel")"
-    [ "$d" = "." ] && d=""
-    # If an ancestor of this entry was already whitelisted as a whole
-    # category (e.g. "repo-gap-audit" before "repo-gap-audit/references"),
-    # $pdir/skills/$d is already a symlink into $dflt/skills — resolving
-    # through it here would mkdir/ln inside the *shared* tree instead of
-    # the profile. The ancestor symlink already exposes this entry, so
-    # just skip it.
-    if [ -n "$d" ] && [ -L "$pdir/skills/$d" ]; then
-      continue
-    fi
-    mkdir -p "$pdir/skills/$d"
-    ln -sfn "$dflt/skills/$rel" "$pdir/skills/$rel"
-  done
-  printf '%s' "$fp" > "$stamp"
   return 0
 }
 
@@ -231,7 +156,11 @@ if [ ! -d "$profiles_dir/$name" ]; then
   create_profile "$name"
 fi
 
-# Keep the profile's skills in sync with SKILL_WHITELIST on every launch.
-sync_skills "$name"
+# Migrate profiles from an earlier hermes version (per-skill hardlinks or
+# symlinks) to the shared whole-folder symlink. Cheap no-op once migrated.
+if [ -d "$HERMES_HOME_DIR/skills" ] && [ ! -L "$profiles_dir/$name/skills" ]; then
+  rm -rf "$profiles_dir/$name/skills"
+  ln -s "$HERMES_HOME_DIR/skills" "$profiles_dir/$name/skills"
+fi
 
 exec "$SBOX_HERMES" -p "$name" "$@"
