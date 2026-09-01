@@ -161,8 +161,14 @@ sync_skills() {
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 # Physical path: symlinks to the same repo must map to the same profile.
 root="$(cd -P "$root" && pwd)"
+cwd="$(pwd)"
 # Sanitized basename + 8-hex hash of the physical path.
 base="$(basename "$root" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+# If cwd is a subdirectory of the git root, use the subdirectory basename
+# instead of the repo root basename, so hermes uses the right profile.
+if [ "$cwd" != "$root" ]; then
+  base="$(basename "$cwd" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')"
+fi
 if [ -z "$base" ]; then
   base="p"
 fi
