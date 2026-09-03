@@ -238,18 +238,23 @@ BWRAP_BASE+=(
   --tmpfs /run
 )
 
-# Slurm/munge (optional): sbatch reads configless config from /run/slurm/conf
-# and authenticates via the munge socket at /var/run/munge (a symlink to /run
-# on the host). Both live under /run, which is a private empty tmpfs above —
-# bind them back in, and recreate the /var/run -> /run symlink, so job
-# submission works the same as outside the sandbox.
-[ -d /run/slurm/conf ] && BWRAP_BASE+=(--ro-bind /run/slurm/conf /run/slurm/conf)
-if [ -d /run/munge ]; then
-  BWRAP_BASE+=(
-    --ro-bind /run/munge /run/munge
-    --dir /var
-    --symlink /run /var/run
-  )
+# Slurm/munge (optional, toggled by ENABLE_SLURM in paths.conf): sbatch reads
+# configless config from /run/slurm/conf and authenticates via the munge
+# socket at /var/run/munge (a symlink to /run on the host). Both live under
+# /run, which is a private empty tmpfs above — bind them back in, and
+# recreate the /var/run -> /run symlink, so job submission works the same as
+# outside the sandbox. sbatch itself is still on PATH either way (it's just
+# /usr/bin/sbatch, always ro-bound); this only blocks it from reaching a
+# working slurm/munge config, so it fails instead of submitting.
+if [ "${ENABLE_SLURM:-1}" = "1" ]; then
+  [ -d /run/slurm/conf ] && BWRAP_BASE+=(--ro-bind /run/slurm/conf /run/slurm/conf)
+  if [ -d /run/munge ]; then
+    BWRAP_BASE+=(
+      --ro-bind /run/munge /run/munge
+      --dir /var
+      --symlink /run /var/run
+    )
+  fi
 fi
 
 BWRAP_BASE+=(

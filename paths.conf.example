@@ -68,6 +68,12 @@ CODER_RW_HERMES="$HOME/.hermes"
 # project, which forced a /login in every new folder (see lib/macos.sh).
 CODER_PROJECT_ISOLATION="claude"
 
+# Slurm/munge access inside the sandbox (Linux only). When 1, sbatch/squeue/
+# etc. can reach /run/slurm/conf and the munge auth socket, so job submission
+# works the same as outside the sandbox. Set to 0 to block it: sbatch is still
+# on PATH (it's just /usr/bin/sbatch) but has no config/auth to submit with.
+ENABLE_SLURM=1
+
 # Entries prepended to PATH inside the sandboxed shell, in order.
 PATH_EXTRA=(
   "$HOME/.local/bin"
