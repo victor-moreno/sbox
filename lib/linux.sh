@@ -296,6 +296,13 @@ if [ "$CODER" = "opencode" ]; then
   )
 fi
 
+# Forward CLAUDE_CONFIG_DIR (e.g. from the claudeUB alias) — env -i below
+# wipes the outer environment, so without this the sandboxed claude always
+# falls back to ~/.claude regardless of what the caller set.
+if [ "$CODER" = "claude" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+  CODER_ENV+=(CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR")
+fi
+
 # Coder tunnel: read from paths.conf CODER_TUNNEL_<CODER> (uppercase key)
 _tunnel_upper="$(printf '%s' "$CODER" | tr '[:lower:]' '[:upper:]')"
 _tunnel_var="CODER_TUNNEL_${_tunnel_upper}"
