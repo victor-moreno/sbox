@@ -66,6 +66,19 @@ REAL_HERMES="${HERMES_BIN:-$HOME/.local/bin/hermes}"
 # ~/.hermes rw). hermes-sbox is the sibling shim: `aicode hermes "$@"`.
 SBOX_HERMES="$SCRIPT_DIR/hermes-sbox"
 
+# Point the hermes-agent checkout's origin at https instead of ssh, so a
+# `hermes update` can pull with no key material. Handles both ssh spellings
+# (git@host:path and ssh://git@host/path); any other scheme is left alone.
+https_origin() {
+  local repo="${HERMES_AGENT_DIR:-$HOME/.hermes/hermes-agent}" url new
+  [ -d "$repo/.git" ] || return 0
+  url="$(git -C "$repo" remote get-url origin 2>/dev/null)" || return 0
+  new="$(printf '%s' "$url" | sed -E 's#^(ssh://)?git@([^/:]+)[:/]#https://\2/#')"
+  [ "$new" = "$url" ] && return 0
+  git -C "$repo" remote set-url origin "$new"
+  echo "hermes: origin → $new (https; the sandbox has no ~/.ssh)" >&2
+}
+
 # Only chat entry points honor the project profile; admin/other subcommands
 # (profile, gateway, config, model, sessions, ...) pass through untouched.
 # Switch targets: bare `hermes`, flag-first, or the `chat` subcommand.
@@ -76,7 +89,29 @@ case "$first" in
   *) is_chat=1 ;;                       # some other subcommand
 esac
 if [ "$is_chat" = 1 ]; then
+  # `hermes update` git-pulls ~/.hermes/hermes-agent from inside the sandbox,
+  # which has no ~/.ssh — an ssh remote can never authenticate there and the
+  # pull dies on a host-key/permission error. Rewrite origin to https (the
+  # repo is public, so a pull needs no credentials at all). Done here, in the
+  # unsandboxed part of the launcher; idempotent, so re-runs are a no-op.
+  if [ "$first" = "update" ]; then
+    https_origin
+  fi
   exec "$SBOX_HERMES" "$@"
+fi
+
+# Chat launches default to the TUI. It has to be an argv flag, not
+# HERMES_TUI=1: the sandbox execs through `env -i`, so nothing exported here
+# survives into hermes. `--tui` is a top-level option, so it goes in global
+# position (ahead of any `chat` subcommand). Skipped when stdin/stdout is not
+# a terminal (piped or --oneshot use has nothing to draw in) and when the
+# caller already spelled out --tui.
+TUI_ARGS=()
+if [ -t 0 ] && [ -t 1 ]; then
+  case " $* " in
+    *" --tui "*) : ;;
+    *) TUI_ARGS=(--tui) ;;
+  esac
 fi
 
 create_profile() {
@@ -155,7 +190,7 @@ if [ ! -d "$profiles_dir/$name" ]; then
     printf 'No Hermes profile for %s\nCreate a "%s" profile? [C]reate / [d]efault / [t]emp: ' "$root" "$name"
     IFS= read -r ans || ans="c"
     case "$ans" in
-      d*|D*) exec "$SBOX_HERMES" "$@" ;;
+      d*|D*) exec "$SBOX_HERMES" ${TUI_ARGS[@]+"${TUI_ARGS[@]}"} "$@" ;;
       t*|T*)
         # Temporary profile: unique per launch, removed on exit.
         # No `exec` here: exec would replace this shell (and its trap) with
@@ -166,7 +201,7 @@ if [ ! -d "$profiles_dir/$name" ]; then
         create_profile "$tmp_name"
         trap 'rm -rf "$profiles_dir/$tmp_name" 2>/dev/null' EXIT
         set +e
-        "$SBOX_HERMES" -p "$tmp_name" "$@"
+        "$SBOX_HERMES" -p "$tmp_name" ${TUI_ARGS[@]+"${TUI_ARGS[@]}"} "$@"
         rc=$?
         set -e
         exit "$rc"
@@ -189,4 +224,4 @@ for f in "${SHARED_FILES[@]}"; do
   fi
 done
 
-exec "$SBOX_HERMES" -p "$name" "$@"
+exec "$SBOX_HERMES" -p "$name" ${TUI_ARGS[@]+"${TUI_ARGS[@]}"} "$@"
