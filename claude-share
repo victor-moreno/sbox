@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# claude-share — share a second Claude config dir with the default one.
+#
+#   claude-share [DST]     DST defaults to ~/.claudeUB, source is ~/.claude
+#
+# Every entry of ~/.claude (history, projects, settings, skills, plugins,
+# hooks, CLAUDE.md, ...) is symlinked into DST, so both accounts see the same
+# state. Account-specific files stay separate: the OAuth credentials, the
+# per-account .claude.json (and its backups), and org policy/settings fetched
+# from the server. A real file/dir already in DST is moved to
+# <name>.pre-share.bak before linking. Idempotent: re-run to link entries that
+# Claude added to ~/.claude since the last run.
+set -euo pipefail
+
+SRC="$HOME/.claude"
+DST="${1:-$HOME/.claudeUB}"
+mkdir -p "$DST"
+
+shopt -s dotglob nullglob
+for src in "$SRC"/*; do
+  name="$(basename "$src")"
+  case "$name" in
+    # Per-account: login token, account/profile state, server-side policy.
+    .credentials.json|.claude.json|backups|policy-limits.json|remote-settings.json) continue ;;
+    # Per-dir markers and key material, not meant to be shared.
+    .last-cleanup|.last-update-result.json|.ssh|*.bak) continue ;;
+  esac
+  dst="$DST/$name"
+  if [ -L "$dst" ]; then
+    [ "$(readlink "$dst")" = "$src" ] && continue
+    echo "skip $dst: symlink to $(readlink "$dst"), not $src" >&2
+    continue
+  fi
+  if [ -e "$dst" ]; then
+    if [ -e "$dst.pre-share.bak" ]; then
+      echo "skip $dst: $dst.pre-share.bak already exists" >&2
+      continue
+    fi
+    mv "$dst" "$dst.pre-share.bak"
+    echo "moved $dst -> $dst.pre-share.bak"
+  fi
+  ln -s "$src" "$dst"
+  echo "linked $dst -> $src"
+done
