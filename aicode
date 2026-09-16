@@ -18,12 +18,12 @@ if [[ ! "$CODER" =~ ^[a-zA-Z0-9_-]+$ ]]; then
   exit 1
 fi
 
-# -slurm / --slurm (any position): enable slurm/munge access for this launch,
+# -sl / --slurm (any position): enable slurm/munge access for this launch,
 # overriding ENABLE_SLURM in paths.conf. Stripped so the coder never sees it.
 ARGS=()
 for _a in "$@"; do
   case "$_a" in
-    -slurm|--slurm) export SBOX_SLURM=1 ;;
+    -sl|--slurm) export SBOX_SLURM=1 ;;
     *) ARGS+=("$_a") ;;
   esac
 done
