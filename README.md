@@ -49,8 +49,20 @@ claude-share             # symlinks each entry of ~/.claude into ~/.claudeUB
    `~/.claudeUB` are moved to `<name>.pre-share.bak`. Re-run it after Claude
    adds new entries to `~/.claude`.
 
-3. Add these functions to `~/.bashrc` / `~/.zshrc`. Each opens (or re-attaches
-   to) a tmux session running the sandboxed claude with the chosen account:
+3. Add the aliases to `~/.bashrc` / `~/.zshrc`. Minimal version, one alias
+   per account (the default account needs no variable):
+
+```
+alias claude='$HOME/bin/sbox/claude'
+alias claudeUB='CLAUDE_CONFIG_DIR=$HOME/.claudeUB $HOME/bin/sbox/claude'
+```
+
+4. Optional: run each launch in a tmux session, so it survives a closed
+   terminal or ssh disconnect. Needs `tmux`; where it isn't installed and you
+   have no admin rights (e.g. a cluster), a conda environment works:
+   `conda create -n tmux -c conda-forge tmux`, then add its `bin` to `PATH`.
+   These functions replace the aliases above; each opens (or re-attaches to)
+   a tmux session running the sandboxed claude with the chosen account:
 
 ```bash
 claude() {
@@ -79,21 +91,23 @@ claudeUB() {
 ```
 
 ```
-# Usage
+# Usage (tmux functions)
 claude                 # default account, tmux session named after the folder
 claudeUB               # second account, same naming
 claude work -c         # session "work", extra args (-c) passed to claude
 claudeUB --resume      # args starting with "-" keep the folder name as session
 ```
 
+   With the tmux functions:
+   - The first argument, if it does not start with `-`, is the tmux session
+     name, not a prompt. `claude "fix the bug"` names a session; use
+     `claude main "fix the bug"` to pass a prompt.
+   - Session names don't include the account, by design: one tmux session per
+     folder. `tmux new-session -A` attaches if the session exists, so whichever
+     account started it keeps running; the other function just re-attaches.
+     Give an explicit name to run both accounts side by side.
+
 Notes:
-- The first argument, if it does not start with `-`, is the tmux session
-  name, not a prompt. `claude "fix the bug"` names a session; use
-  `claude main "fix the bug"` to pass a prompt.
-- Session names don't include the account, by design: one tmux session per
-  folder. `tmux new-session -A` attaches if the session exists, so whichever
-  account started it keeps running; the other function just re-attaches.
-  Give an explicit name to run both accounts side by side.
 - Linux: `env -i` clears the environment inside bubblewrap, so `lib/linux.sh`
   forwards `CLAUDE_CONFIG_DIR` explicitly. Per-project history isolation
   (`CODER_PROJECT_ISOLATION`) bind-mounts over `~/.claude/projects`,
