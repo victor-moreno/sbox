@@ -11,6 +11,8 @@ SBOX_ROOT="${SBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd -P)}
 # load user-editable whitelist
 # shellcheck disable=SC1091
 . "$SBOX_ROOT/paths.conf"
+# `aicode <coder> -slurm` sets SBOX_SLURM=1; it wins over paths.conf's value
+[ "${SBOX_SLURM:-}" = "1" ] && ENABLE_SLURM=1
 
 # ── helper: get newline-delimited coder paths from CODER_RW_<CODER> ──────────
 # Config uses uppercase keys (CODER_RW_CLAUDE), coder name is lowercased.
