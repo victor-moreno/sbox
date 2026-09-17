@@ -11,6 +11,8 @@ claude() {
     # already inside tmux: nesting is refused, so create detached and switch to it
     name="${name//[.:]/_}"  # tmux rewrites . and : in session names
     tmux has-session -t "=$name" 2>/dev/null || tmux new-session -d -s "$name" -n claude "CLAUDE_CONFIG_DIR=\"\$HOME/.claude\" \$HOME/bin/sbox/claude$args"
+    # on exit, return to the calling session: the default detach closes the terminal
+    tmux set-option -t "=$name" detach-on-destroy off
     tmux switch-client -t "=$name"
   else
     tmux new-session -A -s "$name" -n claude "CLAUDE_CONFIG_DIR=\"\$HOME/.claude\" \$HOME/bin/sbox/claude$args"
@@ -30,6 +32,8 @@ claudeUB() {
     # already inside tmux: nesting is refused, so create detached and switch to it
     name="${name//[.:]/_}"  # tmux rewrites . and : in session names
     tmux has-session -t "=$name" 2>/dev/null || tmux new-session -d -s "$name" -n claudeUB "CLAUDE_CONFIG_DIR=\"\$HOME/.claudeUB\" \$HOME/bin/sbox/claude$args"
+    # on exit, return to the calling session: the default detach closes the terminal
+    tmux set-option -t "=$name" detach-on-destroy off
     tmux switch-client -t "=$name"
   else
     tmux new-session -A -s "$name" -n claudeUB "CLAUDE_CONFIG_DIR=\"\$HOME/.claudeUB\" \$HOME/bin/sbox/claude$args"
