@@ -76,7 +76,14 @@ claude() {
   fi
   local args=""
   for a in "$@"; do args+=" $(printf '%q' "$a")"; done
-  tmux new-session -A -s "$name" -n claude "CLAUDE_CONFIG_DIR=\"\$HOME/.claude\" \$HOME/bin/sbox/claude$args"
+  if [ -n "$TMUX" ]; then
+    # already inside tmux: nesting is refused, so create detached and switch to it
+    name="${name//[.:]/_}"  # tmux rewrites . and : in session names
+    tmux has-session -t "=$name" 2>/dev/null || tmux new-session -d -s "$name" -n claude "CLAUDE_CONFIG_DIR=\"\$HOME/.claude\" \$HOME/bin/sbox/claude$args"
+    tmux switch-client -t "=$name"
+  else
+    tmux new-session -A -s "$name" -n claude "CLAUDE_CONFIG_DIR=\"\$HOME/.claude\" \$HOME/bin/sbox/claude$args"
+  fi
 }
 
 claudeUB() {
@@ -88,7 +95,14 @@ claudeUB() {
   fi
   local args=""
   for a in "$@"; do args+=" $(printf '%q' "$a")"; done
-  tmux new-session -A -s "$name" -n claudeUB "CLAUDE_CONFIG_DIR=\"\$HOME/.claudeUB\" \$HOME/bin/sbox/claude$args"
+  if [ -n "$TMUX" ]; then
+    # already inside tmux: nesting is refused, so create detached and switch to it
+    name="${name//[.:]/_}"  # tmux rewrites . and : in session names
+    tmux has-session -t "=$name" 2>/dev/null || tmux new-session -d -s "$name" -n claudeUB "CLAUDE_CONFIG_DIR=\"\$HOME/.claudeUB\" \$HOME/bin/sbox/claude$args"
+    tmux switch-client -t "=$name"
+  else
+    tmux new-session -A -s "$name" -n claudeUB "CLAUDE_CONFIG_DIR=\"\$HOME/.claudeUB\" \$HOME/bin/sbox/claude$args"
+  fi
 }
 ```
 
