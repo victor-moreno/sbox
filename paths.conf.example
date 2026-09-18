@@ -13,13 +13,8 @@ RW=(
   "/tmp"
   "$HOME/.cache"
   "$HOME/.config"
-  "$HOME/.npm"
-  "$HOME/R"
   "$HOME/.local/share/claude/versions/" # claude update
   "$HOME/.local/state/claude/"
-  "$HOME/ondemand/data/sys/dashboard"   # link ondemand dev folder
-  "$HOME/app"
-  "$HOME/ondemand/dev/"
 )
 
 # Shared resources: RW, but opt-in per-project instead of global.
@@ -35,15 +30,11 @@ RW=(
 # other unlisted host path. Note the whole listed path is granted, even if
 # the symlink only points partway into it.
 SHARED_RW=(
-  "$HOME/Downloads/claude/TTS"
-  "$HOME/Downloads/claude/jamovi"
   "/scratch/models"
-  "/shared/projects/AI/ollama/models"
 )
 
 # Read-only inside sandbox (applies to all coders)
 RO=(
-#  "$HOME/bin"
   "$HOME/.local"
   "$HOME/.claude/CLAUDE.md"
   "$HOME/.claudeUB/CLAUDE.md"   # second account (see README)
@@ -73,7 +64,7 @@ CODER_PROJECT_ISOLATION="claude"
 # etc. can reach /run/slurm/conf and the munge auth socket, so job submission
 # works the same as outside the sandbox. Set to 0 to block it: sbatch is still
 # on PATH (it's just /usr/bin/sbatch) but has no config/auth to submit with.
-ENABLE_SLURM=1
+ENABLE_SLURM=0
 
 # Entries prepended to PATH inside the sandboxed shell, in order.
 PATH_EXTRA=(
