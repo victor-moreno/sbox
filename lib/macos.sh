@@ -149,6 +149,9 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
 {
   echo "(version 1)"
   echo "(allow default)"
+  # no Apple Events: osascript could otherwise drive Terminal/VS Code/Finder,
+  # which run unsandboxed (e.g. `tell app "Terminal" to do script ...`)
+  echo "(deny appleevent-send)"
   # (allow default) alone left everything outside $HOME writable: /usr/local
   # (Homebrew on Intel is user-owned, so its binaries could be swapped),
   # /Applications (admin group), /Volumes, /Users/Shared. Writes are now

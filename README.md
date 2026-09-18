@@ -189,5 +189,6 @@ sandbox method:
   linux:  bwrap (bubblewrap)
   macos:  sandbox-exec; writes are allowlisted everywhere (project, paths.conf
           RW, temp dirs), so /usr/local, /Applications, /Volumes stay
-          read-only or hidden
+          read-only or hidden; Apple Events are denied (no osascript
+          control of Terminal, VS Code, Finder)
 ```
