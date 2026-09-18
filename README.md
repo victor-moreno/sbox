@@ -127,6 +127,20 @@ claudeUB --resume      # args starting with "-" keep the folder name as session
      account started it keeps running; the other function just re-attaches.
      Give an explicit name to run both accounts side by side.
 
+## VS Code extension
+
+The Claude Code extension normally runs its own bundled binary, unsandboxed.
+Point it at `claude-vscode` in VS Code **User** settings (the setting is
+machine-scoped, so workspace settings ignore it):
+
+```json
+"claudeCode.claudeProcessWrapper": "/Users/<you>/bin/sbox/claude-vscode"
+```
+
+Each chat panel then runs the brew `claude` through `aicode`, sandboxed to the
+workspace folder plus `paths.conf`. For the second account, also set
+`"claudeCode.environmentVariables": [{"name": "CLAUDE_CONFIG_DIR", "value": "/Users/<you>/.claudeUB"}]`.
+
 Notes:
 - Linux: `env -i` clears the environment inside bubblewrap, so `lib/linux.sh`
   forwards `CLAUDE_CONFIG_DIR` explicitly. Per-project history isolation

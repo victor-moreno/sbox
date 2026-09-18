@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# claude-vscode — sandboxed launcher for the Claude Code VS Code extension.
+# Set it as the extension's process wrapper (VS Code *User* settings; the
+# setting is machine-scoped, so workspace settings ignore it):
+#   "claudeCode.claudeProcessWrapper": "/Users/<you>/bin/sbox/claude-vscode"
+# The extension then runs: claude-vscode <bundled claude binary> <sdk args...>
+# with cwd = workspace folder, speaking stream-json over stdin/stdout — so no
+# tmux here, and nothing on the way to claude may print to stdout.
+SOURCE="${BASH_SOURCE[0]:-$0}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname -- "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname -- "$SOURCE")" && pwd)"
+
+# drop the extension's bundled binary: it lives under ~/.vscode, which the
+# sandbox policy hides, so aicode runs the brew-installed claude instead
+[[ "$1" == /* && -x "$1" ]] && shift
+
+# same config dir as the terminal `claude` alias, so both share one login
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+exec "$SCRIPT_DIR/aicode" claude "$@"
