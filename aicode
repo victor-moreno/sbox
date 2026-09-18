@@ -26,7 +26,7 @@ ARGS=()
 for _a in "$@"; do
   case "$_a" in
     -sl|--slurm) export SBOX_SLURM=1 ;;
-    -local|--local) SBOX_LOCAL=1 ;;
+    -local|--local) export SBOX_LOCAL=1 ;;
     *) ARGS+=("$_a") ;;
   esac
 done

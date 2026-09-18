@@ -193,8 +193,12 @@ if [[ -n "$_tunnel_config" ]]; then
   fi
 fi
 # clear any ANTHROPIC_BASE_URL inherited from the invoking shell so the
-# sandbox only ever sees it when paths.conf configures a tunnel for this host
-unset ANTHROPIC_BASE_URL
+# sandbox only ever sees it when paths.conf configures a tunnel for this host.
+# -local is the other legitimate source: without this guard it was wiped here
+# and claude silently fell back to api.anthropic.com (401, "Please run /login").
+if [[ -z "${SBOX_LOCAL:-}" ]]; then
+  unset ANTHROPIC_BASE_URL
+fi
 
 # ── network filter: netproxy runs outside the sandbox ────────────────────────
 # Allowlist = NET_ALLOW (paths.conf) + net-allow.conf ("Always allow" answers);
