@@ -9,13 +9,8 @@
 
 : "${LOCAL_LLM_BASE_URL:=http://localhost:8000}"
 
-# The Linux sandbox runs with --unshare-net, so a server on the host's
-# localhost is invisible from inside; only macOS Seatbelt allows it through.
-if [ "$(uname -s)" = "Linux" ]; then
-  echo "aicode: -local is macOS-only: the Linux sandbox unshares the network namespace," >&2
-  echo "        so $LOCAL_LLM_BASE_URL on the host is unreachable from inside." >&2
-  exit 1
-fi
+# On Linux the sandbox unshares the network namespace; lib/linux.sh bridges
+# the port of a localhost URL into it (netproxy relay/forward).
 
 _local_models="$(curl -sf -m 5 "$LOCAL_LLM_BASE_URL/v1/models")" || {
   echo "aicode: -local: no model server responding at $LOCAL_LLM_BASE_URL" >&2

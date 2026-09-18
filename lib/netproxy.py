@@ -11,6 +11,8 @@ outbound connection has to come through here, via HTTP(S)_PROXY.
            unknown                           -> ask (dialog), else 403
   forward  Linux only, runs INSIDE the sandbox: 127.0.0.1:PORT -> unix socket,
            bridging the private network namespace to the proxy outside.
+  relay    Linux only, runs OUTSIDE: unix socket -> one fixed host:port (the
+           `aicode -local` model server), the other end of a forward.
 
 Patterns: "host" exact, "*.host" any subdomain, "*" everything, "!pattern"
 deny without asking (checked first). HTTPS is tunnelled, not decrypted, so
@@ -269,6 +271,27 @@ async def forward(a):
         await server.serve_forever()
 
 
+async def relay(a):
+    # the reverse of forward, run OUTSIDE: one fixed host port (the -local
+    # model server) exposed as a unix socket, unfiltered, so the sandbox gets
+    # that port and nothing else on the host's loopback
+    host, port = split_hostport(a.connect, 80)
+
+    async def handle(reader, writer):
+        try:
+            up_r, up_w = await asyncio.open_connection(host, port)
+        except OSError:
+            writer.close()
+            return
+        await asyncio.gather(pipe(reader, up_w), pipe(up_r, writer))
+
+    server = await asyncio.start_unix_server(handle, a.unix)
+    if a.watch_pid:
+        asyncio.ensure_future(watch(a.watch_pid, None))
+    async with server:
+        await server.serve_forever()
+
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="mode", required=True)
@@ -287,10 +310,14 @@ def main():
     f = sub.add_parser("forward")
     f.add_argument("--listen", type=int, required=True)
     f.add_argument("--unix", required=True)
+    r = sub.add_parser("relay")
+    r.add_argument("--unix", required=True)
+    r.add_argument("--connect", required=True)
+    r.add_argument("--watch-pid", type=int)
     a = p.parse_args()
     # Ctrl-C in the sandboxed terminal must not take the proxy down
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    asyncio.run(serve(a) if a.mode == "serve" else forward(a))
+    asyncio.run({"serve": serve, "forward": forward, "relay": relay}[a.mode](a))
 
 
 if __name__ == "__main__":

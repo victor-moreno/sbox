@@ -20,7 +20,7 @@ aicode <any-cmd>     # any command on PATH or in homebrew
 claude -sl -c        # enable slurm/munge access for this launch (Linux),
                      # overriding ENABLE_SLURM=0; other args go to claude
 claude -local        # use a model served at localhost:8000 instead of the
-                     # API (macOS only); fails if nothing is serving
+                     # API; fails if nothing is serving
 sbox                 # interactive sandboxed shell
 ```
 
@@ -177,7 +177,8 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
 - Enforcement: on macOS, Seatbelt blocks every outbound connection except
   localhost, unix sockets outside the project, and DNS lookups. On Linux,
   bwrap gets `--unshare-net`, and a forwarder inside the sandbox links
-  `127.0.0.1:3128` to the proxy socket. With slurm enabled, Linux keeps the
+  `127.0.0.1:3128` to the proxy socket. With `-local`, the model server's
+  localhost port is bridged the same way (and only that port). With slurm enabled, Linux keeps the
   host network (slurmctld needs direct TCP), so only tools that honour
   `*_PROXY` are filtered.
 - Tools that ignore `*_PROXY` get no network (ssh, raw sockets, some node apps).

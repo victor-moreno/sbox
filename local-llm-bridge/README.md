@@ -4,7 +4,7 @@ Scratch scaffolding for pointing Claude Code at a locally served model, for
 trying ideas — not for real work.
 
 The backend must expose the Anthropic Messages API at `/v1/messages`
-(vLLM >= 0.26 does). OpenAI-only servers such as llama.cpp or Ollama need a
+(vLLM >= 0.26 and SGLang do). OpenAI-only servers such as llama.cpp or Ollama need a
 translating proxy in front; the LiteLLM setup that used to live here was
 removed because the vLLM endpoint makes it unnecessary.
 
@@ -23,5 +23,7 @@ Override the endpoint with `LOCAL_LLM_BASE_URL`, or pin a model with
   (it accepts `xhigh`, `medium`, `low`) and the user settings default to high.
 - `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is required: the model is not in Claude
   Code's catalog, so it otherwise assumes a 200k window.
-- macOS only. The Linux sandbox uses `--unshare-net`, so a server on the
-  host's localhost is unreachable from inside.
+- Linux: the sandbox uses `--unshare-net`, so `lib/linux.sh` bridges the
+  model's localhost port in (netproxy `relay` outside, `forward` inside);
+  other host loopback ports stay unreachable. Tested with SGLang serving
+  deepseek-v4-flash on compute-cuda-04.

@@ -187,6 +187,23 @@ if [ "${NET_FILTER:-1}" = "1" ]; then
     )
     NET_FORWARD=1
     _proxy="http://127.0.0.1:3128"
+    # -local on the host's loopback: the private namespace can't see it, and
+    # NO_PROXY keeps claude off netproxy for localhost, so bridge just that
+    # port (relay here, forward in the rc file) at the same address inside
+    if [ -n "${SBOX_LOCAL:-}" ]; then
+      _llm_hp="${ANTHROPIC_BASE_URL#*://}"; _llm_hp="${_llm_hp%%/*}"
+      case "${_llm_hp%:*}" in
+        localhost|127.0.0.1)
+          LLM_PORT="${_llm_hp##*:}"
+          [ "$LLM_PORT" = "$_llm_hp" ] && LLM_PORT=80
+          python3 "$SBOX_ROOT/lib/netproxy.py" relay --unix "$NETDIR/llm.sock" \
+            --connect "127.0.0.1:$LLM_PORT" --watch-pid $$ \
+            </dev/null >/dev/null 2>>"$_netlog" &
+          for _i in $(seq 50); do [ -S "$NETDIR/llm.sock" ] && break; sleep 0.1; done
+          [ -S "$NETDIR/llm.sock" ] || { echo "aicode: -local relay did not start, see $_netlog" >&2; exit 1; }
+          ;;
+      esac
+    fi
   fi
   NET_ENV=(
     HTTP_PROXY="$_proxy" HTTPS_PROXY="$_proxy" ALL_PROXY="$_proxy"
@@ -219,6 +236,11 @@ if ! (exec 3<>/dev/tcp/127.0.0.1/3128) 2>/dev/null; then
   for _i in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/3128) 2>/dev/null && break; sleep 0.1; done
 fi
 RCEOF
+  fi
+  if [ -n "${LLM_PORT:-}" ]; then
+    printf 'if ! (exec 3<>/dev/tcp/127.0.0.1/%s) 2>/dev/null; then\n' "$LLM_PORT"
+    printf '  ( python3 /run/sbox-netproxy.py forward --listen %s --unix /run/sbox-net/llm.sock >/dev/null 2>&1 & )\n' "$LLM_PORT"
+    printf '  for _i in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/%s) 2>/dev/null && break; sleep 0.1; done\nfi\n' "$LLM_PORT"
   fi
   if [ "$CODER" = "shell" ]; then
     cat <<'RCEOF'
@@ -328,6 +350,18 @@ fi
 _tunnel_upper="$(printf '%s' "$CODER" | tr '[:lower:]' '[:upper:]')"
 _tunnel_var="CODER_TUNNEL_${_tunnel_upper}"
 _tunnel_config="${!_tunnel_var:-}"
+# -local supplies its own ANTHROPIC_BASE_URL; env -i would drop it and every
+# other var lib/local-llm.sh exported, so pass them on explicitly
+if [ -n "${SBOX_LOCAL:-}" ]; then
+  _tunnel_config=""
+  for _v in SBOX_LOCAL ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL \
+      ANTHROPIC_SMALL_FAST_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL \
+      ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL \
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS CLAUDE_CODE_EFFORT_LEVEL \
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC; do
+    [ -n "${!_v:-}" ] && CODER_ENV+=("$_v=${!_v}")
+  done
+fi
 if [ -n "$_tunnel_config" ]; then
   _tunnel_host="${_tunnel_config%%=*}"
   _tunnel_url="${_tunnel_config#*=}"

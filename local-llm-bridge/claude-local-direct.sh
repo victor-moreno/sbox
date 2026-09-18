@@ -36,4 +36,8 @@ export DISABLE_TELEMETRY=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 echo "local: $M at $LOCAL_LLM_BASE_URL (${CTX} ctx)" >&2
-exec /opt/homebrew/bin/claude "$@"
+# the real binary, not a PATH lookup: on PATH, claude may be the sbox shim
+for _c in /opt/homebrew/bin/claude "$HOME/.local/bin/claude"; do
+  [ -x "$_c" ] && exec "$_c" "$@"
+done
+echo "claude binary not found" >&2; exit 1
