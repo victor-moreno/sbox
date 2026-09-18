@@ -19,6 +19,8 @@ aicode hermes        # Hermes Agent in a sandbox
 aicode <any-cmd>     # any command on PATH or in homebrew
 claude -sl -c        # enable slurm/munge access for this launch (Linux),
                      # overriding ENABLE_SLURM=0; other args go to claude
+claude -local        # use a model served at localhost:8000 instead of the
+                     # API (macOS only); fails if nothing is serving
 sbox                 # interactive sandboxed shell
 ```
 
