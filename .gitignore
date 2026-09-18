@@ -1,8 +1,6 @@
 # per-project dirs created by the sandbox itself
 .claude/
 .cache/
-.qwen/
-.opencode/
 .tmp/
 
 # keep paths specific to linux/mac

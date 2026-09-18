@@ -15,9 +15,7 @@ alias claude-share='$DIR/claude-share'  # share ~/.claude with ~/.claudeUB
 ```
 # Usage
 aicode claude        # Claude Code in a sandbox
-aicode opencode      # OpenCode in a sandbox
 aicode hermes        # Hermes Agent in a sandbox
-aicode qwen          # Qwen Code in a sandbox
 aicode <any-cmd>     # any command on PATH or in homebrew
 claude -sl -c        # enable slurm/munge access for this launch (Linux),
                      # overriding ENABLE_SLURM=0; other args go to claude

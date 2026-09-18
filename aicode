@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # aicode — run a coding assistant inside a sandbox restricted to the current directory.
 # Usage: aicode <coder> [args...]
-#   coder: claude, opencode, qwen, or any command-name on PATH
+#   coder: claude, hermes, or any command-name on PATH
 set -e
 
 if [ $# -lt 1 ]; then
   echo "aicode: usage: aicode <coder> [args...]" >&2
-  echo "  coders: claude, pi, opencode, hermes, qwen, ..." >&2
+  echo "  coders: claude, hermes, ..." >&2
   exit 1
 fi
 
