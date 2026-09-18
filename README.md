@@ -171,6 +171,11 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
   display (SSH session, headless Linux), means deny; the 403 tells the coder
   which file to edit. Both files are read-only inside the sandbox and
   re-read live.
+- Linux without a display (ssh, cluster): if the coder was launched inside
+  tmux, the question opens as a tmux popup over its screen instead:
+  `a` Allow, `A` Always allow, any other key Deny (keys typed in the first
+  0.6 s are ignored, so typing meant for the coder can't answer it). Launched
+  outside tmux, it is still a 403.
 - Patterns: `host`, `*.host` (subdomains), `host:port` (that port only, e.g.
   `10.10.0.2:22`), `!host` (deny, don't ask).
 - HTTPS is tunnelled, not decrypted, so allowing a host allows any traffic

@@ -13,6 +13,8 @@ outbound connection has to come through here, via HTTP(S)_PROXY.
            bridging the private network namespace to the proxy outside.
   relay    Linux only, runs OUTSIDE: unix socket -> one fixed host:port (the
            `aicode -local` model server), the other end of a forward.
+  ask      the question itself, run by `serve` in a tmux popup (Linux, when
+           the coder was launched inside tmux): one keypress answers.
 
 Patterns: "host:port" one port of a host (e.g. ssh: "10.10.0.2:22"), "host" exact, "*.host" any subdomain, "*" everything, "!pattern"
 deny without asking (checked first). HTTPS is tunnelled, not decrypted, so
@@ -22,11 +24,16 @@ import argparse
 import asyncio
 import os
 import re
+import select
+import shlex
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import termios
 import time
+import tty
 from urllib.parse import urlsplit
 
 DIALOG_TIMEOUT = 60
@@ -144,6 +151,10 @@ def dialog(host, port, project):
         if "Always allow" in r.stdout:
             return "always"
         return "allow" if "button returned:Allow" in r.stdout else "deny"
+    # a terminal-only Linux session (ssh, cluster) has no dialog to show, but
+    # a coder launched inside tmux can be asked in a popup over its own screen
+    if os.environ.get("TMUX") and shutil.which("tmux"):
+        return tmux_popup(host, port, project)
     if (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) and shutil.which("zenity"):
         cmd = ["zenity", "--question", "--title=sbox network", "--text=" + text,
                "--ok-label=Allow", "--cancel-label=Deny", "--extra-button=Always allow",
@@ -158,6 +169,60 @@ def dialog(host, port, project):
             return "timeout"
         return "allow" if r.returncode == 0 else "deny"
     return "nogui"
+
+
+def tmux_popup(host, port, project):
+    # the answer comes back through a private dir outside the sandbox: NETDIR
+    # is writable from inside, so an answer file there could be forged
+    d = tempfile.mkdtemp(prefix="sbox-ask-")
+    answer = os.path.join(d, "answer")
+    cmd = [sys.executable, os.path.abspath(__file__), "ask", "--answer", answer,
+           "--host", host, "--port", str(port), "--project", project]
+    popup = ["tmux", "display-popup", "-E", "-w", "72", "-h", "13", "-T", " sbox network "]
+    # $TMUX_PANE (inherited from the launcher) puts it on the coder's client
+    if os.environ.get("TMUX_PANE"):
+        popup += ["-t", os.environ["TMUX_PANE"]]
+    popup.append(" ".join(shlex.quote(c) for c in cmd))
+    deadline = time.time() + DIALOG_TIMEOUT + 10
+    try:
+        r = subprocess.run(popup, capture_output=True, timeout=DIALOG_TIMEOUT + 10)
+        if r.returncode != 0:
+            return "nogui"  # e.g. no client attached to the session
+        # display-popup may return before the popup closes
+        while time.time() < deadline:
+            try:
+                with open(answer) as f:
+                    got = f.read().strip()
+                return got if got in ("allow", "always", "deny", "timeout") else "deny"
+            except FileNotFoundError:
+                time.sleep(0.2)
+        return "timeout"
+    except (OSError, subprocess.TimeoutExpired):
+        return "nogui"
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def ask(a):
+    print("\n  %s\n\n  wants to connect to\n\n    %s:%s\n" % (a.project, a.host, a.port))
+    print("  [a] Allow   [A] Always allow   any other key: Deny")
+    print("  (deny in %d s)" % DIALOG_TIMEOUT, end="", flush=True)
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        # keystrokes meant for the coder, typed as the popup opened, must not
+        # answer it: drop whatever arrives in the first moment
+        time.sleep(0.6)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        ready = select.select([fd], [], [], DIALOG_TIMEOUT)[0]
+        key = os.read(fd, 1) if ready else b""
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    answer = {b"a": "allow", b"A": "always"}.get(key, "deny" if ready else "timeout")
+    with open(a.answer + ".tmp", "w") as f:
+        f.write(answer + "\n")
+    os.rename(a.answer + ".tmp", a.answer)
 
 
 def split_hostport(s, default):
@@ -320,7 +385,14 @@ def main():
     r.add_argument("--unix", required=True)
     r.add_argument("--connect", required=True)
     r.add_argument("--watch-pid", type=int)
+    k = sub.add_parser("ask")
+    k.add_argument("--answer", required=True)
+    k.add_argument("--host", required=True)
+    k.add_argument("--port", required=True)
+    k.add_argument("--project", default="?")
     a = p.parse_args()
+    if a.mode == "ask":
+        return ask(a)
     # Ctrl-C in the sandboxed terminal must not take the proxy down
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     asyncio.run({"serve": serve, "forward": forward, "relay": relay}[a.mode](a))
