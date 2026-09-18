@@ -29,6 +29,15 @@ for _a in "$@"; do
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
+# sbox is claude's sandbox: turn off claude's own per-command Bash sandbox
+# (sandbox.enabled in the shared ~/.claude/settings.json, which the desktop app
+# also uses). Nesting Seatbelt fails with "sandbox_apply: Operation not
+# permitted" on macOS. --settings outranks user settings, so the desktop app
+# keeps its sandbox.
+if [[ "$CODER" == "claude" ]]; then
+  set -- --settings '{"sandbox":{"enabled":false}}' "$@"
+fi
+
 # already inside a sandbox shell — just run the coder directly
 if [ -n "$SANDBOX_DIR" ]; then
   exec command "$CODER" "$@"
