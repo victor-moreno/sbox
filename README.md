@@ -154,11 +154,40 @@ paths.conf   define which paths the sandbox gets RO or RW
              SHARED_RW lists RW paths that are opt-in per project: a project
              only gets one if it contains a symlink resolving to it
              CODER_PROJECT_ISOLATION sets coders with per-project history
+             NET_FILTER / NET_ALLOW configure the network filter
              no changes to lib/* needed for new coders
+net-allow.conf  "Always allow" answers from the network dialog (local, editable)
 ```
+
+## Network filter
+
+With `NET_FILTER=1` (the default), the sandbox reaches the internet only
+through `lib/netproxy.py`, a small HTTP proxy that runs outside the sandbox
+and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
+
+- Hosts in `NET_ALLOW` (paths.conf) or `net-allow.conf` connect directly.
+- Any other host opens a dialog: **Deny**, **Allow** (this session) or
+  **Always allow** (appended to `net-allow.conf`). No answer in 60 s, or no
+  display (SSH session, headless Linux), means deny; the 403 tells the coder
+  which file to edit. Both files are read-only inside the sandbox and
+  re-read live.
+- Patterns: `host`, `*.host` (subdomains), `!host` (deny, don't ask).
+- HTTPS is tunnelled, not decrypted, so allowing a host allows any traffic
+  to it, uploads included.
+- Enforcement: on macOS, Seatbelt blocks every outbound connection except
+  localhost, unix sockets outside the project, and DNS lookups. On Linux,
+  bwrap gets `--unshare-net`, and a forwarder inside the sandbox links
+  `127.0.0.1:3128` to the proxy socket. With slurm enabled, Linux keeps the
+  host network (slurmctld needs direct TCP), so only tools that honour
+  `*_PROXY` are filtered.
+- Tools that ignore `*_PROXY` get no network (ssh, raw sockets, some node apps).
+- Log: `~/.local/state/sbox/net.log` (one line per host and session, plus
+  every refusal).
 
 ```
 sandbox method:
   linux:  bwrap (bubblewrap)
-  macos:  sandbox-exec
+  macos:  sandbox-exec; writes are allowlisted everywhere (project, paths.conf
+          RW, temp dirs), so /usr/local, /Applications, /Volumes stay
+          read-only or hidden
 ```

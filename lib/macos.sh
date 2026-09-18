@@ -149,6 +149,14 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
 {
   echo "(version 1)"
   echo "(allow default)"
+  # (allow default) alone left everything outside $HOME writable: /usr/local
+  # (Homebrew on Intel is user-owned, so its binaries could be swapped),
+  # /Applications (admin group), /Volumes, /Users/Shared. Writes are now
+  # allowlisted too: temp dirs and devices here, the rest re-allowed below.
+  echo "(deny file-write*)"
+  echo '(allow file-write* (subpath "/private/tmp") (subpath "/private/var/folders") (subpath "/private/var/tmp") (subpath "/dev"))'
+  # external/network drives hold data, not tools: opt in via paths.conf RO/RW
+  echo '(deny file-read* (subpath "/Volumes"))'
   printf '(deny file-read* file-write* (subpath "%s"))\n' "$HOME"
   printf '(allow file-read* (literal "%s"))\n' "$HOME"
   printf '(allow file-read* file-write* (subpath "%s"))\n' "$SANDBOX_DIR"
@@ -203,10 +211,25 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
 
   [[ -n "${SANDBOX_HISTFILE:-}" ]] && \
     printf '(allow file-read* file-write* (literal "%s"))\n' "$SANDBOX_HISTFILE"
+
+  # network filter: only localhost (dev servers, the IDE websocket, the
+  # netproxy below) is reachable directly; the internet goes through netproxy.
+  # Unix sockets only inside the project: /private/tmp holds the tmux server
+  # socket (send-keys to an unsandboxed shell) and $TMPDIR VS Code's IPC.
+  # No mDNSResponder socket either, so no DNS lookups (and no DNS tunnelling).
+  if [[ "${NET_FILTER:-1}" == "1" ]]; then
+    echo "(deny network-outbound)"
+    echo '(allow network-outbound (remote ip "localhost:*"))'
+    printf '(allow network-outbound (remote unix-socket (subpath "%s")))\n' "$SANDBOX_DIR"
+  fi
+  # the allowlists must stay read-only even when the project is sbox itself
+  printf '(deny file-write* (literal "%s") (literal "%s"))\n' "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/net-allow.conf"
 } > "$POLICY"
 
 ZDOT=""
 cleanup() {
+  [[ -n "${NETPID:-}" ]] && kill "$NETPID" 2>/dev/null
+  [[ -n "${NETDIR:-}" ]] && rm -rf "$NETDIR"
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
   return 0
@@ -227,6 +250,29 @@ fi
 # clear any ANTHROPIC_BASE_URL inherited from the invoking shell so the
 # sandbox only ever sees it when paths.conf configures a tunnel for this host
 unset ANTHROPIC_BASE_URL
+
+# ── network filter: netproxy runs outside the sandbox ────────────────────────
+# Allowlist = NET_ALLOW (paths.conf) + net-allow.conf ("Always allow" answers);
+# other hosts pop a dialog. Both files are read-only inside the sandbox.
+if [[ "${NET_FILTER:-1}" == "1" ]]; then
+  NETDIR="$(mktemp -d /tmp/sbox-net-XXXXXX)"
+  _netlog="$HOME/.local/state/sbox/net.log"
+  mkdir -p "${_netlog:h}"
+  python3 "$SBOX_ROOT/lib/netproxy.py" serve --port-file "$NETDIR/port" \
+    --watch-pid $$ --project "$SANDBOX_DIR" --log "$_netlog" \
+    --always-file "$SBOX_ROOT/net-allow.conf" \
+    --hint "Allow it outside the sandbox: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf" \
+    "${NET_ALLOW[@]/#/--allow=}" </dev/null >/dev/null 2>>"$_netlog" &
+  NETPID=$!
+  for _i in {1..50}; do [[ -s "$NETDIR/port" ]] && break; sleep 0.1; done
+  [[ -s "$NETDIR/port" ]] || { echo "aicode: netproxy did not start, see $_netlog" >&2; exit 1; }
+  _proxy="http://127.0.0.1:$(<"$NETDIR/port")"
+  export HTTP_PROXY="$_proxy" HTTPS_PROXY="$_proxy" ALL_PROXY="$_proxy"
+  export http_proxy="$_proxy" https_proxy="$_proxy" all_proxy="$_proxy"
+  export NO_PROXY="localhost,127.0.0.1,::1" no_proxy="localhost,127.0.0.1,::1"
+  # node >= 24 ignores *_PROXY unless asked
+  export NODE_USE_ENV_PROXY=1
+fi
 
 # ── coder mode ───────────────────────────────────────────────────────────────
 if [[ "$CODER" != "shell" ]]; then

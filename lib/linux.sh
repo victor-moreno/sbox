@@ -172,6 +172,55 @@ if [ -n "$CONDA_BASE" ]; then
   CONDA_PATH_PREFIX="${CONDA_ENV_PATH:+$CONDA_ENV_PATH/bin:}$CONDA_BASE/condabin:"
 fi
 
+# ── network filter: netproxy runs outside the sandbox ────────────────────────
+# Allowlist = NET_ALLOW (paths.conf) + net-allow.conf ("Always allow" answers);
+# other hosts pop a zenity dialog if there is a display, else are refused.
+# --unshare-net leaves the sandbox only its own loopback: netproxy listens on
+# a unix socket bound into /run/sbox-net and a forwarder inside the sandbox
+# (started from the rc file) bridges 127.0.0.1:3128 to it. Slurm reaches
+# slurmctld over plain TCP, which a private namespace would cut, so with slurm
+# enabled the proxy is advisory: *_PROXY is set, direct connections still work.
+NET_BWRAP=()
+NET_ENV=()
+NET_FORWARD=0
+if [ "${NET_FILTER:-1}" = "1" ]; then
+  NETDIR="$(mktemp -d /tmp/sbox-net-XXXXXX)"
+  _netlog="$HOME/.local/state/sbox/net.log"
+  mkdir -p "$(dirname "$_netlog")"
+  touch "$SBOX_ROOT/net-allow.conf"
+  _net_args=(serve --watch-pid $$ --cleanup "$NETDIR" --project "$SANDBOX_DIR"
+    --log "$_netlog" --always-file "$SBOX_ROOT/net-allow.conf"
+    --hint "Allow it outside the sandbox: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf")
+  for _h in "${NET_ALLOW[@]+"${NET_ALLOW[@]}"}"; do _net_args+=(--allow="$_h"); done
+  if [ "${ENABLE_SLURM:-1}" = "1" ]; then
+    echo "aicode: slurm enabled, network filter is advisory only (direct connections not blocked)" >&2
+    python3 "$SBOX_ROOT/lib/netproxy.py" "${_net_args[@]}" --port-file "$NETDIR/port" \
+      </dev/null >/dev/null 2>>"$_netlog" &
+    for _i in $(seq 50); do [ -s "$NETDIR/port" ] && break; sleep 0.1; done
+    [ -s "$NETDIR/port" ] || { echo "aicode: netproxy did not start, see $_netlog" >&2; exit 1; }
+    _proxy="http://127.0.0.1:$(cat "$NETDIR/port")"
+  else
+    python3 "$SBOX_ROOT/lib/netproxy.py" "${_net_args[@]}" --unix "$NETDIR/proxy.sock" \
+      </dev/null >/dev/null 2>>"$_netlog" &
+    for _i in $(seq 50); do [ -S "$NETDIR/proxy.sock" ] && break; sleep 0.1; done
+    [ -S "$NETDIR/proxy.sock" ] || { echo "aicode: netproxy did not start, see $_netlog" >&2; exit 1; }
+    NET_BWRAP=(
+      --unshare-net
+      --bind "$NETDIR" /run/sbox-net
+      --ro-bind "$SBOX_ROOT/lib/netproxy.py" /run/sbox-netproxy.py
+    )
+    NET_FORWARD=1
+    _proxy="http://127.0.0.1:3128"
+  fi
+  NET_ENV=(
+    HTTP_PROXY="$_proxy" HTTPS_PROXY="$_proxy" ALL_PROXY="$_proxy"
+    http_proxy="$_proxy" https_proxy="$_proxy" all_proxy="$_proxy"
+    NO_PROXY="localhost,127.0.0.1,::1" no_proxy="localhost,127.0.0.1,::1"
+    # node >= 24 ignores *_PROXY unless asked
+    NODE_USE_ENV_PROXY=1
+  )
+fi
+
 # ── rc file (shared by both modes) ──────────────────────────────────────────
 RC_FILE="$(mktemp /tmp/sbox-rc-XXXXXX)"
 {
@@ -186,6 +235,15 @@ RC_FILE="$(mktemp /tmp/sbox-rc-XXXXXX)"
   cat <<'RCEOF'
 alias ll='ls -la'
 RCEOF
+  if [ "$NET_FORWARD" = "1" ]; then
+    # bridge the private loopback to netproxy; ( & ) keeps it out of job control
+    cat <<'RCEOF'
+if ! (exec 3<>/dev/tcp/127.0.0.1/3128) 2>/dev/null; then
+  ( python3 /run/sbox-netproxy.py forward --listen 3128 --unix /run/sbox-net/proxy.sock >/dev/null 2>&1 & )
+  for _i in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/3128) 2>/dev/null && break; sleep 0.1; done
+fi
+RCEOF
+  fi
   if [ "$CODER" = "shell" ]; then
     cat <<'RCEOF'
 echo ""
@@ -259,6 +317,9 @@ if [ "${ENABLE_SLURM:-1}" = "1" ]; then
   fi
 fi
 
+# after --tmpfs /run, which would hide these mounts
+BWRAP_BASE+=("${NET_BWRAP[@]+"${NET_BWRAP[@]}"}")
+
 BWRAP_BASE+=(
   # SANDBOX_DIR bound last (after /tmp and /run are remounted, and after every
   # other bind above) so it always wins RW: bwrap remounts recursively, so an
@@ -267,6 +328,9 @@ BWRAP_BASE+=(
   # under $HOME/bin, which is RO), or the private tmpfs /tmp above when a
   # project dir sits under /tmp.
   --bind "$SANDBOX_DIR" "$SANDBOX_DIR"
+  # the allowlists stay read-only even when the project is sbox itself
+  --ro-bind-try "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/paths.conf"
+  --ro-bind-try "$SBOX_ROOT/net-allow.conf" "$SBOX_ROOT/net-allow.conf"
   # Bound after SANDBOX_DIR so this stays visible even in the edge case where
   # SANDBOX_DIR is /tmp itself (which would otherwise shadow it).
   --bind "$RC_FILE" /tmp/sandbox-rc
@@ -334,6 +398,7 @@ ENV_BASE=(
   SANDBOX_DIR="$SANDBOX_DIR"
   "${CODER_ENV[@]}"
   "${CONDA_ENV_VARS[@]}"
+  "${NET_ENV[@]+"${NET_ENV[@]}"}"
   PATH="${_extra_path}${CONDA_PATH_PREFIX}/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
 )
 

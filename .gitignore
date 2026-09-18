@@ -12,3 +12,18 @@ paths.conf
 TTS
 .hermes
 test/
+
+# local planning files (plan-with-files), not pushed
+task_plan.md
+findings.md
+progress.md
+
+# "Always" answers from the network filter dialog
+net-allow.conf
+
+# planning files: local only
+task_plan.md
+findings.md
+progress.md
+# runtime network decisions (see lib/netproxy.py)
+net-allow.conf

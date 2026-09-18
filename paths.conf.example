@@ -73,3 +73,28 @@ PATH_EXTRA=(
   "$HOME/.local/python3/bin"
 )
 
+
+# Network filter. 1: the sandbox reaches the internet only through
+# lib/netproxy.py (HTTP(S)_PROXY), which allows the hosts below and asks
+# about any other one in a dialog (Deny / Allow for this session / Always
+# allow). "Always" answers go to net-allow.conf next to this file; edit it
+# freely, it is re-read live. Both files are read-only inside the sandbox.
+# Patterns: "host" exact, "*.host" subdomains, "!pattern" deny without asking.
+# HTTPS is not decrypted: allowing a host allows any traffic to it.
+# macOS: direct connections other than localhost are blocked by Seatbelt.
+# Linux: the sandbox gets its own network namespace, except with slurm
+# enabled (slurmctld needs direct TCP), where the filter is advisory only.
+# Tools that ignore HTTP(S)_PROXY get no network. 0 disables all of this.
+NET_FILTER=1
+NET_ALLOW=(
+  # claude
+  "*.anthropic.com" "claude.ai" "*.claude.ai" "claude.com" "*.claude.com"
+  # git hosting
+  "github.com" "*.github.com" "*.githubusercontent.com" "*.github.io" "ghcr.io"
+  "git.iconcologia.net"
+  # packages: python, node, R, models
+  "pypi.org" "files.pythonhosted.org" "registry.npmjs.org"
+  "*.r-project.org" "bioconductor.org" "*.bioconductor.org" "*.r-universe.dev"
+  "packagemanager.posit.co"
+  "huggingface.co" "*.huggingface.co" "*.hf.co"
+)
