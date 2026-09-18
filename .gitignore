@@ -25,3 +25,7 @@ findings.md
 progress.md
 # runtime network decisions (see lib/netproxy.py)
 net-allow.conf
+
+# python bytecode caches
+__pycache__/
+*.pyc
