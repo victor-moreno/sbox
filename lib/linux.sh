@@ -355,6 +355,8 @@ ENV_BASE=(
   "${CONDA_ENV_VARS[@]}"
   "${NET_ENV[@]+"${NET_ENV[@]}"}"
   PATH="${_extra_path}${CONDA_PATH_PREFIX}/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin"
+  DISABLE_TELEMETRY="1"
+  DISABLE_ERROR_REPORTING="1" 
 )
 
 # ── exec ─────────────────────────────────────────────────────────────────────
