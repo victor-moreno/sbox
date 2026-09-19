@@ -171,7 +171,8 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
   display (SSH session, headless Linux), means deny; the 403 tells the coder
   which file to edit. Both files are read-only inside the sandbox and
   re-read live.
-- Patterns: `host`, `*.host` (subdomains), `!host` (deny, don't ask).
+- Patterns: `host`, `*.host` (subdomains), `host:port` (that port only, e.g.
+  `10.10.0.2:22`), `!host` (deny, don't ask).
 - HTTPS is tunnelled, not decrypted, so allowing a host allows any traffic
   to it, uploads included.
 - Enforcement: on macOS, Seatbelt blocks every outbound connection except
@@ -182,6 +183,8 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
   host network (slurmctld needs direct TCP), so only tools that honour
   `*_PROXY` are filtered.
 - Tools that ignore `*_PROXY` get no network (ssh, raw sockets, some node apps).
+  ssh works through the proxy for allowed hosts:
+  `ssh -o ProxyCommand='nc -X connect -x ${HTTPS_PROXY#http://} %h %p' 10.10.0.2`
 - Log: `~/.local/state/sbox/net.log` (one line per host and session, plus
   every refusal).
 

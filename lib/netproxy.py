@@ -14,7 +14,7 @@ outbound connection has to come through here, via HTTP(S)_PROXY.
   relay    Linux only, runs OUTSIDE: unix socket -> one fixed host:port (the
            `aicode -local` model server), the other end of a forward.
 
-Patterns: "host" exact, "*.host" any subdomain, "*" everything, "!pattern"
+Patterns: "host:port" one port of a host (e.g. ssh: "10.10.0.2:22"), "host" exact, "*.host" any subdomain, "*" everything, "!pattern"
 deny without asking (checked first). HTTPS is tunnelled, not decrypted, so
 only the host name is known — allowing a host allows any traffic to it.
 """
@@ -33,7 +33,11 @@ DIALOG_TIMEOUT = 60
 HOST_RE = re.compile(r"^[a-z0-9._:\[\]-]{1,253}$")
 
 
-def match(pattern, host):
+def match(pattern, host, port=None):
+    # "host:port" pattern (e.g. 10.10.0.2:22) only matches that port
+    h, sep, pt = pattern.rpartition(":")
+    if sep and pt.isdigit() and pattern.count(":") == 1:
+        return port is not None and pt == str(port) and match(h, host)
     if pattern == "*":
         return True
     if pattern.startswith("*."):
@@ -82,19 +86,20 @@ class Policy:
             self.mtime, self.always = m, read_patterns(self.always_file)
         return self.static + self.always
 
-    def listed(self, host):
+    def listed(self, host, port):
         pats = self.patterns()
-        if any(match(p[1:], host) for p in pats if p.startswith("!")):
+        if any(match(p[1:], host, port) for p in pats if p.startswith("!")):
             return False
-        if any(match(p, host) for p in pats if not p.startswith("!")):
+        if any(match(p, host, port) for p in pats if not p.startswith("!")):
             return True
         return None
 
     async def allowed(self, host, port):
-        verdict = self.listed(host)
+        verdict = self.listed(host, port)
         if verdict is not None:
-            if host not in self.session:
-                self.session[host] = verdict
+            # own key: a port-specific entry must not cover the host's other ports
+            if (host, port) not in self.session:
+                self.session[(host, port)] = verdict
                 self.log("allow" if verdict else "deny-listed", host, port)
             return verdict
         if host in self.session:
