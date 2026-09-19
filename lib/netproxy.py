@@ -219,7 +219,8 @@ class Proxy:
         except (OSError, asyncio.TimeoutError) as e:
             return reply(writer, "502 Bad Gateway", "sbox proxy: cannot reach %s:%s (%s)\n" % (host, port, e))
         if method == "CONNECT":
-            writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            # 1.0: macOS nc -X connect (ssh ProxyCommand) rejects 1.1
+            writer.write(b"HTTP/1.0 200 Connection established\r\n\r\n")
         else:
             # origin-form request line; one request per connection keeps a
             # keep-alive client from reusing this tunnel for another host
