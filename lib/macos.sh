@@ -124,6 +124,18 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
     printf '(allow file-read-metadata (literal "%s"))\n' "$_anc"
   done
 
+  # same for parents of RO/RW entries under $HOME (e.g. ~/Library for
+  # ~/Library/R): realpath() stats every component, so R's normalizePath()
+  # failed with EPERM. Metadata only, no listing or reading.
+  for p in "${RO[@]}" "${RW[@]}"; do
+    [[ -e "$p" && "$p" == "$HOME"/* ]] || continue
+    _anc="$p"
+    while [[ "${_anc:h}" != "$HOME" && "${_anc:h}" != "/" ]]; do
+      _anc="${_anc:h}"
+      printf '(allow file-read-metadata (literal "%s"))\n' "$_anc"
+    done
+  done
+
   for p in "${RO[@]}"; do
     [[ -e "$p" ]] || continue
     if [[ -d "$p" ]]; then
