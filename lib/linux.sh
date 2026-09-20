@@ -320,6 +320,15 @@ BWRAP_BASE=(
 
 # Minimal /dev — only essential devices instead of full /dev exposure
 BWRAP_BASE+=(--dir /dev)
+# The /proc-backed links every real /dev has, which a bare --dir /dev lacks:
+# without /dev/fd, bash process substitution (`cmd <(cmd)`) fails inside the
+# sandbox. They expose nothing new — /proc is already mounted.
+BWRAP_BASE+=(
+  --symlink /proc/self/fd /dev/fd
+  --symlink /proc/self/fd/0 /dev/stdin
+  --symlink /proc/self/fd/1 /dev/stdout
+  --symlink /proc/self/fd/2 /dev/stderr
+)
 [ -d /dev/pts ] && BWRAP_BASE+=(--bind /dev/pts /dev/pts)
 for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
   # --dev-bind (not --bind) required for char devices: --bind sets MS_NODEV
