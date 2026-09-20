@@ -291,6 +291,24 @@ for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
   [ -e "$_d" ] && BWRAP_BASE+=(--dev-bind "$_d" "$_d")
 done
 
+# NVIDIA/CUDA (only when the host has the devices): the char devices plus
+# /sys/module/nvidia, which the tmpfs root hides — NVML reads
+# /sys/module/nvidia/initstate and otherwise fails with "GPU access blocked
+# by the operating system" even with the devices bound. /dev/shm is needed by
+# torch dataloader workers and NCCL, and /dev is a bare --dir here.
+GPU_BWRAP=()
+for _d in /dev/nvidia*; do
+  [ -e "$_d" ] && GPU_BWRAP+=(--dev-bind "$_d" "$_d")
+done
+if [ "${#GPU_BWRAP[@]}" -gt 0 ] && [ -d /sys/module/nvidia ]; then
+  BWRAP_BASE+=(
+    "${GPU_BWRAP[@]}"
+    --tmpfs /dev/shm
+    --dir /sys
+    --ro-bind /sys/module /sys/module
+  )
+fi
+
 BWRAP_BASE+=(
   --tmpfs /tmp
   --tmpfs /run
@@ -345,6 +363,10 @@ CODER_ENV=()
 if [ "$CODER" = "claude" ] && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
   CODER_ENV+=(CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR")
 fi
+
+# env -i also drops the GPU allocation of an enclosing slurm job / manual
+# selection, which would let the sandbox see every GPU on the node
+[ -n "${CUDA_VISIBLE_DEVICES:-}" ] && CODER_ENV+=(CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES")
 
 # Coder tunnel: read from paths.conf CODER_TUNNEL_<CODER> (uppercase key)
 _tunnel_upper="$(printf '%s' "$CODER" | tr '[:lower:]' '[:upper:]')"
