@@ -29,3 +29,6 @@ net-allow.conf
 # python bytecode caches
 __pycache__/
 *.pyc
+
+# NFS silly-rename artifacts
+.nfs*
