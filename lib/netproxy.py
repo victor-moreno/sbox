@@ -13,6 +13,8 @@ outbound connection has to come through here, via HTTP(S)_PROXY.
            bridging the private network namespace to the proxy outside.
   relay    Linux only, runs OUTSIDE: unix socket -> one fixed host:port (the
            `aicode -local` model server), the other end of a forward.
+  connect  Linux only, runs INSIDE: one CONNECT tunnel on stdin/stdout, used
+           as ssh's ProxyCommand (ssh speaks neither HTTP proxy nor DNS).
   ask      the question itself, run by `serve` in a tmux popup (Linux, when
            the coder was launched inside tmux): one keypress answers.
 
@@ -28,6 +30,7 @@ import select
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -363,9 +366,55 @@ async def relay(a):
         await server.serve_forever()
 
 
+def connect(a):
+    # ssh's ProxyCommand inside the sandbox: talk to the proxy's unix socket
+    # directly (no dependency on the 127.0.0.1:3128 forwarder) and hand ssh
+    # the resulting tunnel on stdin/stdout. The name is resolved outside, by
+    # the proxy — the private network namespace has no DNS.
+    sock = socket.socket(socket.AF_UNIX)
+    try:
+        sock.connect(a.unix)
+        sock.sendall(("CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n"
+                      % (a.host, a.port, a.host, a.port)).encode("latin-1"))
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = sock.recv(65536)
+            if not chunk:
+                sys.exit("sbox: proxy closed the connection")
+            head += chunk
+        head, _, rest = head.partition(b"\r\n\r\n")
+        status, _, _ = head.partition(b"\r\n")
+        if b" 200" not in status:
+            sys.exit("sbox: %s\n%s" % (status.decode("latin-1"), rest.decode("latin-1", "replace")))
+    except OSError as e:
+        sys.exit("sbox: cannot reach the proxy (%s)" % e)
+    out = sys.stdout.buffer
+    if rest:
+        out.write(rest)
+        out.flush()
+    fds = [0, sock]
+    while fds:
+        ready, _, _ = select.select(fds, [], [])
+        if 0 in ready:
+            data = os.read(0, 65536)
+            if data:
+                sock.sendall(data)
+            else:
+                fds.remove(0)
+                sock.shutdown(socket.SHUT_WR)
+        if sock in ready:
+            data = sock.recv(65536)
+            if not data:
+                break
+            out.write(data)
+            out.flush()
+
+
 def main():
     p = argparse.ArgumentParser()
-    sub = p.add_subparsers(dest="mode", required=True)
+    # not add_subparsers(required=True): that needs 3.7, and `connect` runs as
+    # ssh's ProxyCommand, which may pick up an older system python3
+    sub = p.add_subparsers(dest="mode")
     s = sub.add_parser("serve")
     s.add_argument("--allow", action="append", default=[])
     s.add_argument("--always-file", required=True)
@@ -385,14 +434,22 @@ def main():
     r.add_argument("--unix", required=True)
     r.add_argument("--connect", required=True)
     r.add_argument("--watch-pid", type=int)
+    c = sub.add_parser("connect")
+    c.add_argument("--unix", required=True)
+    c.add_argument("host")
+    c.add_argument("port", type=int)
     k = sub.add_parser("ask")
     k.add_argument("--answer", required=True)
     k.add_argument("--host", required=True)
     k.add_argument("--port", required=True)
     k.add_argument("--project", default="?")
     a = p.parse_args()
+    if not a.mode:
+        p.error("a mode is required")
     if a.mode == "ask":
         return ask(a)
+    if a.mode == "connect":
+        return connect(a)
     # Ctrl-C in the sandboxed terminal must not take the proxy down
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     asyncio.run({"serve": serve, "forward": forward, "relay": relay}[a.mode](a))

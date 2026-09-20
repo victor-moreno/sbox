@@ -214,6 +214,39 @@ if [ "${NET_FILTER:-1}" = "1" ]; then
   )
 fi
 
+# ── ssh (SSH_DIR in paths.conf) ─────────────────────────────────────────────
+# The sandbox home is a fresh tmpfs, so ssh finds no ~/.ssh at all: no key, no
+# config, no known_hosts. Expose SSH_DIR read-only at its own path (the user's
+# config refers to its files by absolute path) and generate the ~/.ssh/config
+# ssh actually reads. It includes the real config first, so per-host settings
+# there win, then adds a global ProxyCommand: with --unshare-net the proxy is
+# the only way out, and it is also the only resolver (the private namespace
+# has no DNS). Without the filter, or in slurm mode, connections are direct.
+SSH_BWRAP=()
+if [ -n "${SSH_DIR:-}" ] && [ -d "$SSH_DIR" ]; then
+  SSH_TMP="$(mktemp -d /tmp/sbox-ssh-XXXXXX)"
+  : > "$SSH_TMP/config"
+  # ssh rejects a group- or world-writable config, which the default umask gives
+  chmod 600 "$SSH_TMP/config"
+  if [ -f "$SSH_DIR/config" ]; then
+    printf 'Include %s/config\n' "$SSH_DIR" >> "$SSH_TMP/config"
+  fi
+  if [ "$NET_FORWARD" = "1" ]; then
+    printf 'Host *\n  ProxyCommand python3 /run/sbox-netproxy.py connect --unix /run/sbox-net/proxy.sock %%h %%p\n' \
+      >> "$SSH_TMP/config"
+  fi
+  # bwrap maps only our own uid, so every root-owned file shows up as nobody
+  # and ssh refuses to read /etc/ssh/ssh_config{,.d/*} ("Bad owner or
+  # permissions") — which kills it before it reads anything else. Shadow the
+  # system config with an empty file we own; ours is the per-user one.
+  : > "$SSH_TMP/empty"
+  SSH_BWRAP=(
+    --ro-bind "$SSH_DIR" "$SSH_DIR"
+    --ro-bind "$SSH_TMP/config" "$HOME/.ssh/config"
+    --ro-bind "$SSH_TMP/empty" /etc/ssh/ssh_config
+  )
+fi
+
 # ── rc file (shared by both modes) ──────────────────────────────────────────
 RC_FILE="$(mktemp /tmp/sbox-rc-XXXXXX)"
 {
@@ -257,7 +290,7 @@ RCEOF
   fi
 } > "$RC_FILE"
 
-trap 'rm -f "$RC_FILE"' EXIT INT TERM
+trap 'rm -rf "$RC_FILE" "${SSH_TMP:-}"' EXIT INT TERM
 
 # ── bwrap mount layout ───────────────────────────────────────────────────────
 BWRAP_BASE=(
@@ -279,6 +312,9 @@ BWRAP_BASE=(
   "${CODER_BWRAP[@]}"
   "${CONDA_BWRAP[@]}"
   "${PROJECT_BWRAP[@]}"
+  # after the coder binds: SSH_DIR stays read-only even when it sits inside a
+  # coder's RW config dir (e.g. ~/.claude/.ssh), so the key can't be rewritten
+  "${SSH_BWRAP[@]}"
   --proc /proc
 )
 
@@ -431,7 +467,7 @@ source /tmp/sandbox-rc
 exec "$CODER" "\$@"
 WRAPEOF
   chmod +x "$WRAPPER"
-  trap 'rm -f "$RC_FILE" "$WRAPPER"' EXIT INT TERM
+  trap 'rm -rf "$RC_FILE" "${SSH_TMP:-}" "$WRAPPER"' EXIT INT TERM
 
   # /tmp is a fresh tmpfs inside the sandbox, so the wrapper must be bound in
   BWRAP_BASE+=(--ro-bind "$WRAPPER" /tmp/sandbox-wrap)

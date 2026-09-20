@@ -77,6 +77,14 @@ PATH_EXTRA=(
   "$HOME/.local/python3/bin"
 )
 
+# ssh inside the sandbox (Linux). This directory is exposed read-only as
+# ~/.ssh, so its config, keys and known_hosts are the ones ssh and git use.
+# Unset (the default) means no ssh identity at all; point it at a dedicated
+# dir rather than your own ~/.ssh if you'd rather not hand the coder every
+# key you have. With NET_FILTER=1 connections are tunnelled through netproxy,
+# which also resolves the name, so the host must be in NET_ALLOW.
+# SSH_DIR="$HOME/.claude/.ssh"
+
 
 # Network filter. 1: the sandbox reaches the internet only through
 # lib/netproxy.py (HTTP(S)_PROXY), which allows the hosts below and asks

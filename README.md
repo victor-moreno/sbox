@@ -187,11 +187,35 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
   localhost port is bridged the same way (and only that port). With slurm enabled, Linux keeps the
   host network (slurmctld needs direct TCP), so only tools that honour
   `*_PROXY` are filtered.
-- Tools that ignore `*_PROXY` get no network (ssh, raw sockets, some node apps).
-  ssh works through the proxy for allowed hosts:
-  `ssh -o ProxyCommand='nc -X connect -x ${HTTPS_PROXY#http://} %h %p' 10.10.0.2`
+- Tools that ignore `*_PROXY` get no network (raw sockets, some node apps).
+  `ssh` is the exception: see below.
 - Log: `~/.local/state/sbox/net.log` (one line per host and session, plus
   every refusal).
+
+## ssh (Linux)
+
+The sandbox home is a fresh tmpfs, so there is no `~/.ssh` in it unless
+`SSH_DIR` is set in paths.conf. That directory is bound read-only both at its
+own path and as `~/.ssh`, so its config, keys and `known_hosts` are what `ssh`
+and `git` use — read-only, so the coder can use the key but can't rewrite it
+or add host keys.
+
+`~/.ssh/config` inside the sandbox is generated per launch: it `Include`s the
+real config first (per-host settings there win) and then adds a global
+`ProxyCommand` that tunnels through netproxy (`netproxy.py connect`), since
+with `--unshare-net` the proxy is both the only route out and the only
+resolver. The target host therefore needs to be in `NET_ALLOW` /
+`net-allow.conf` like any other, and it is logged the same way
+(`git.iconcologia.net:22`). Without the filter, or with slurm enabled,
+connections are direct and no `ProxyCommand` is added.
+
+`/etc/ssh/ssh_config` is shadowed with an empty file at the same time: bwrap
+maps only your own uid, so root-owned files look like `nobody` inside and ssh
+would abort with "Bad owner or permissions" before reading anything else.
+
+On macOS no config is generated; ssh to an allowed host goes through the proxy
+by hand:
+`ssh -o ProxyCommand='nc -X connect -x ${HTTPS_PROXY#http://} %h %p' 10.10.0.2`
 
 - GPU: with `ENABLE_GPU=1` (paths.conf, Linux) the `/dev/nvidia*` devices,
   `/sys/module` (read-only) and a `/dev/shm` tmpfs are bound in when the host
