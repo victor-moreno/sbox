@@ -291,15 +291,18 @@ for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
   [ -e "$_d" ] && BWRAP_BASE+=(--dev-bind "$_d" "$_d")
 done
 
-# NVIDIA/CUDA (only when the host has the devices): the char devices plus
+# NVIDIA/CUDA (toggled by ENABLE_GPU in paths.conf, and only when the host
+# has the devices): the char devices plus
 # /sys/module/nvidia, which the tmpfs root hides — NVML reads
 # /sys/module/nvidia/initstate and otherwise fails with "GPU access blocked
 # by the operating system" even with the devices bound. /dev/shm is needed by
 # torch dataloader workers and NCCL, and /dev is a bare --dir here.
 GPU_BWRAP=()
-for _d in /dev/nvidia*; do
-  [ -e "$_d" ] && GPU_BWRAP+=(--dev-bind "$_d" "$_d")
-done
+if [ "${ENABLE_GPU:-1}" = "1" ]; then
+  for _d in /dev/nvidia*; do
+    [ -e "$_d" ] && GPU_BWRAP+=(--dev-bind "$_d" "$_d")
+  done
+fi
 if [ "${#GPU_BWRAP[@]}" -gt 0 ] && [ -d /sys/module/nvidia ]; then
   BWRAP_BASE+=(
     "${GPU_BWRAP[@]}"

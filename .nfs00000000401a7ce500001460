@@ -13,35 +13,36 @@ RW=(
   "/tmp"
   "$HOME/.cache"
   "$HOME/.config"
+  "$HOME/.npm"
+  "$HOME/R"
   "$HOME/.local/share/claude/versions/" # claude update
   "$HOME/.local/state/claude/"
+  "$HOME/ondemand/data/sys/dashboard"   # link ondemand dev folder
+  "$HOME/app"
 )
 
 # Shared resources: RW, but opt-in per-project instead of global.
-# A project only gets access if it contains a symlink (anywhere in the
-# project tree, e.g. ./TTS or tools/TTS — .git/node_modules/.venv aren't
-# searched) that resolves to one of these paths, or to something *under*
-# one of these paths (e.g. a symlink into a subfolder of a shared jamovi
-# dir). The symlink's name doesn't matter, only where it points. Activate
-# with e.g.
-#   ln -s "$HOME/Downloads/claude/TTS" ./TTS
-# Deactivate by removing the symlink. Matching is by resolved target, not
-# filename, so an untrusted project can't get access by symlinking to some
-# other unlisted host path. Note the whole listed path is granted, even if
-# the symlink only points partway into it.
+# a symlink that points partway these paths is writable
 SHARED_RW=(
-  "/scratch/models"
+  "$HOME/app/STAMP"
+  "$HOME/ondemand/dev/"
+  "$HOME/prj/apuntesBE-med1"	# submodulos
+  "$HOME/prj/TTS"
 )
 
 # Read-only inside sandbox (applies to all coders)
 RO=(
   "$HOME/.local"
   "$HOME/.claude/CLAUDE.md"
-  "$HOME/.claudeUB/CLAUDE.md"   # second account (see README)
+  "$HOME/.claudeUB/CLAUDE.md"
   "$HOME/.gitconfig"
   "$HOME/.gitignore_global"
   "$HOME/.Rprofile"
-  "/share"                    # Linux cluster software (skipped elsewhere)
+  "/scratch"
+  "/shared/projects/AI/ollama/models"
+  "/shared/projects/AI/huggingface"
+  "/shared/projects/AI/models/tts"
+  "/share"                      # Linux cluster software (skipped elsewhere)
 )
 
 # Coder-specific RW paths, keyed by CODER_RW_<codername> variables.
@@ -50,6 +51,7 @@ RO=(
 # For any coder not listed here, ~/.<coder> and ~/.<coder>.json are tried.
 CODER_RW_CLAUDE="$(printf '%s\n%s\n' "$HOME/.claude" "$HOME/.claude.json" "$HOME/.claudeUB")"
 CODER_RW_HERMES="$HOME/.hermes"
+
 
 # Per-project isolation: coders whose conversation history is isolated per project.
 # Linux only (bind-mounts). macOS ignores this: claude already namespaces history
@@ -61,6 +63,7 @@ CODER_PROJECT_ISOLATION="claude"
 # etc. can reach /run/slurm/conf and the munge auth socket, so job submission
 # works the same as outside the sandbox. Set to 0 to block it: sbatch is still
 # on PATH (it's just /usr/bin/sbatch) but has no config/auth to submit with.
+
 ENABLE_SLURM=0
 
 # GPU access inside the sandbox (Linux only). When 1, the host's /dev/nvidia*
@@ -77,6 +80,7 @@ PATH_EXTRA=(
   "$HOME/.local/python3/bin"
 )
 
+SSH_AUTH_SOCK=
 
 # Network filter. 1: the sandbox reaches the internet only through
 # lib/netproxy.py (HTTP(S)_PROXY), which allows the hosts below and asks
@@ -91,14 +95,20 @@ PATH_EXTRA=(
 # Tools that ignore HTTP(S)_PROXY get no network. 0 disables all of this.
 NET_FILTER=1
 NET_ALLOW=(
-  # claude
   "*.anthropic.com" "claude.ai" "*.claude.ai" "claude.com" "*.claude.com"
-  # git hosting
   "github.com" "*.github.com" "*.githubusercontent.com" "*.github.io" "ghcr.io"
   "git.iconcologia.net"
-  # packages: python, node, R, models
   "pypi.org" "files.pythonhosted.org" "registry.npmjs.org"
   "*.r-project.org" "bioconductor.org" "*.bioconductor.org" "*.r-universe.dev"
   "packagemanager.posit.co"
   "huggingface.co" "*.huggingface.co" "*.hf.co"
+  "api.telegram.org"
+
+  # claude-code telemetry (Datadog logs): deny silently, no dialog
+  "!*.datadoghq.com"
 )
+
+DISABLE_TELEMETRY=1
+DISABLE_ERROR_REPORTING=1
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+

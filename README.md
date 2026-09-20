@@ -193,9 +193,10 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
 - Log: `~/.local/state/sbox/net.log` (one line per host and session, plus
   every refusal).
 
-- GPU: on Linux the `/dev/nvidia*` devices, `/sys/module` (read-only) and a
-  `/dev/shm` tmpfs are bound in when the host has NVIDIA devices, so CUDA
-  works inside the sandbox; `CUDA_VISIBLE_DEVICES` is forwarded.
+- GPU: with `ENABLE_GPU=1` (paths.conf, Linux) the `/dev/nvidia*` devices,
+  `/sys/module` (read-only) and a `/dev/shm` tmpfs are bound in when the host
+  has NVIDIA devices, so CUDA works inside the sandbox; `CUDA_VISIBLE_DEVICES`
+  is forwarded. `ENABLE_GPU=0` hides the GPUs.
 
 ```
 sandbox method:
