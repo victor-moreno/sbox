@@ -178,6 +178,12 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
     echo "(deny network-outbound)"
     echo '(allow network-outbound (remote ip "localhost:*"))'
     printf '(allow network-outbound (remote unix-socket (subpath "%s")))\n' "$SANDBOX_DIR"
+    # extra unix sockets from paths.conf (e.g. docker); file access + connect
+    for p in "${UNIX_SOCKETS[@]}"; do
+      [[ -S "$p" ]] || continue
+      printf '(allow file-read* file-write* (literal "%s"))\n' "$p"
+      printf '(allow network-outbound (remote unix-socket (literal "%s")))\n' "$p"
+    done
   fi
   # the allowlists must stay read-only even when the project is sbox itself
   printf '(deny file-write* (literal "%s") (literal "%s"))\n' "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/net-allow.conf"

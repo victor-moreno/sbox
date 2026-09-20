@@ -98,6 +98,12 @@ PATH_EXTRA=(
 # enabled (slurmctld needs direct TCP), where the filter is advisory only.
 # Tools that ignore HTTP(S)_PROXY get no network. 0 disables all of this.
 NET_FILTER=1
+# Unix sockets reachable despite the filter (macOS). WARNING: docker socket =
+# root-equivalent on the host (a container can mount anything), so this
+# defeats the file sandbox. Seatbelt resolves symlinks: list the real target.
+UNIX_SOCKETS=(
+  "$HOME/.orbstack/run/docker.sock"
+)
 NET_ALLOW=(
   # claude
   "*.anthropic.com" "claude.ai" "*.claude.ai" "claude.com" "*.claude.com"
