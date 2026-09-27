@@ -95,6 +95,37 @@ if (( ${#SHARED_RW[@]} > 0 )); then
   done < <(find "$SANDBOX_DIR" -maxdepth 2 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
 fi
 
+# ── docker via colima: one VM per project, mounting only the project ─────────
+# docker = root in its VM, so the VM's mounts are the real boundary: OrbStack
+# shares the whole host filesystem, a default colima mounts ~. -docker starts
+# colima profile sbox-<dir>-<hash> with $SANDBOX_DIR as its only mount; the
+# sandbox gets that socket, never ~/.colima (editing colima.yaml from inside
+# could add mounts). The VM keeps running after exit: colima stop -p <profile>.
+COLIMA_DIR="${COLIMA_HOME:-$HOME/.colima}"
+DOCKER_SOCK=""
+if [[ -n "${SBOX_DOCKER:-}" ]]; then
+  command -v colima >/dev/null || { echo "aicode: -docker needs colima (brew install colima)" >&2; exit 1; }
+  # lima instance names allow single separators between alphanumerics only
+  _n="$(printf '%s' "${(L)SANDBOX_DIR:t}" | tr -cs 'a-z0-9' '-')"
+  _n="${${_n[1,16]#-}%-}"
+  _profile="sbox-${_n:+$_n-}$(printf '%s' "$SANDBOX_DIR" | shasum | cut -c1-6)"
+  if ! colima status -p "$_profile" >/dev/null 2>&1; then
+    echo "aicode: starting colima profile $_profile (mount: $SANDBOX_DIR)" >&2
+    # --activate=false: leave the host's docker context alone (e.g. OrbStack)
+    colima start -p "$_profile" --mount "$SANDBOX_DIR:w" --ssh-agent=false --activate=false || exit 1
+  fi
+  DOCKER_SOCK="$COLIMA_DIR/$_profile/docker.sock"
+  [[ -S "$DOCKER_SOCK" ]] || { echo "aicode: no docker socket at $DOCKER_SOCK" >&2; exit 1; }
+  export DOCKER_HOST="unix://$DOCKER_SOCK"
+  # ~/.docker stays hidden (registry credentials, other contexts); a session
+  # config dir links the CLI plugins (compose, buildx) and silences the
+  # "Error loading config file" warning
+  DOCKDIR="$(mktemp -d /tmp/sbox-docker-XXXXXX)"
+  mkdir "$DOCKDIR/cli-plugins"
+  for p in "$HOME"/.docker/cli-plugins/*(N); do ln -s "${p:A}" "$DOCKDIR/cli-plugins/${p:t}"; done
+  export DOCKER_CONFIG="$DOCKDIR"
+fi
+
 # ── build sandbox-exec policy ────────────────────────────────────────────────
 POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
 {
@@ -185,6 +216,15 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
       printf '(allow network-outbound (remote unix-socket (literal "%s")))\n' "$p"
     done
   fi
+  # container VMs share host dirs with root containers: OrbStack (all of it,
+  # also behind /var/run/docker.sock), other colima profiles, lima (~ by
+  # default; its ssh ControlMaster sockets give a shell in the VM). Denied
+  # even with NET_FILTER=0; only this project's colima socket gets through.
+  printf '(deny network-outbound (remote unix-socket (subpath "%s")))\n' "$HOME/.orbstack" "$COLIMA_DIR" "$HOME/.lima"
+  if [[ -n "$DOCKER_SOCK" ]]; then
+    printf '(allow file-read* file-write* (literal "%s"))\n' "$DOCKER_SOCK"
+    printf '(allow network-outbound (remote unix-socket (literal "%s")))\n' "$DOCKER_SOCK"
+  fi
   # the allowlists must stay read-only even when the project is sbox itself
   printf '(deny file-write* (literal "%s") (literal "%s"))\n' "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/net-allow.conf"
 } > "$POLICY"
@@ -193,6 +233,7 @@ ZDOT=""
 cleanup() {
   [[ -n "${NETPID:-}" ]] && kill "$NETPID" 2>/dev/null
   [[ -n "${NETDIR:-}" ]] && rm -rf "$NETDIR"
+  [[ -n "${DOCKDIR:-}" ]] && rm -rf "$DOCKDIR"
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
   return 0

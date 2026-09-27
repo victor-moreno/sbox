@@ -21,6 +21,8 @@ claude -sl -c        # enable slurm/munge access for this launch (Linux),
                      # overriding ENABLE_SLURM=0; other args go to claude
 claude -local        # use a model served at localhost:8000 instead of the
                      # API; fails if nothing is serving
+claude -docker       # docker via a colima VM that mounts only this folder
+                     # (macOS, see Docker below)
 sbox                 # interactive sandboxed shell
 ```
 
@@ -221,6 +223,31 @@ by hand:
   `/sys/module` (read-only) and a `/dev/shm` tmpfs are bound in when the host
   has NVIDIA devices, so CUDA works inside the sandbox; `CUDA_VISIBLE_DEVICES`
   is forwarded. `ENABLE_GPU=0` hides the GPUs.
+
+## Docker (macOS)
+
+`aicode <coder> -docker` (`SBOX_DOCKER=1` for `sbox` or the VS Code wrapper)
+gives the sandbox a docker daemon that only sees the project folder.
+
+- A container is root in its VM, so what the VM mounts is the real
+  boundary. OrbStack (whole Mac filesystem), a default colima (`~`) and lima
+  (`~`) would undo the sandbox: sockets under `~/.orbstack`, `~/.colima` and
+  `~/.lima` are denied, also with `NET_FILTER=0` (`/var/run/docker.sock`
+  points into `~/.orbstack`). OrbStack keeps working outside the sandbox.
+- `-docker` starts, outside the sandbox, colima profile
+  `sbox-<folder>-<hash>` with the project as its only mount (rw, same path),
+  and sets `DOCKER_HOST` to its socket. The sandbox gets that socket only,
+  never `~/.colima`, so it can't change the mounts; don't add `~/.colima`
+  to `paths.conf`. `docker run -v "$PWD:/w"` works; other host paths
+  (symlinked `SHARED_RW` dirs too) appear empty in containers.
+- One VM per project (colima defaults: 2 CPUs, 2 GB, own image store). The
+  first start takes a minute. It keeps running after the session:
+  `colima list`, `colima stop -p <profile>`, `colima delete -p <profile>`.
+- `~/.docker` stays hidden (credentials): each session gets a temporary
+  `DOCKER_CONFIG` linking the CLI plugins (compose, buildx), so a
+  `docker login` inside lasts one session.
+- The VM has its own network: containers bypass the network filter.
+- Linux: `-docker` is ignored.
 
 ```
 sandbox method:

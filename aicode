@@ -21,12 +21,15 @@ fi
 # -sl / --slurm (any position): enable slurm/munge access for this launch,
 # overriding ENABLE_SLURM in paths.conf.
 # -local (any position): run claude against a model served on localhost.
-# Both are stripped so the coder never sees them.
+# -docker (any position, macOS): docker via a colima VM that mounts only the
+# project (see lib/macos.sh).
+# All are stripped so the coder never sees them.
 ARGS=()
 for _a in "$@"; do
   case "$_a" in
     -sl|--slurm) export SBOX_SLURM=1 ;;
     -local|--local) export SBOX_LOCAL=1 ;;
+    -docker|--docker) export SBOX_DOCKER=1 ;;
     *) ARGS+=("$_a") ;;
   esac
 done
