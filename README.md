@@ -230,24 +230,33 @@ by hand:
 gives the sandbox a docker daemon that only sees the project folder.
 
 - A container is root in its VM, so what the VM mounts is the real
-  boundary. OrbStack (whole Mac filesystem), a default colima (`~`) and lima
+  boundary. OrbStack (whole Mac filesystem), your own colima (`~`) and lima
   (`~`) would undo the sandbox: sockets under `~/.orbstack`, `~/.colima` and
   `~/.lima` are denied, also with `NET_FILTER=0` (`/var/run/docker.sock`
-  points into `~/.orbstack`). OrbStack keeps working outside the sandbox.
-- `-docker` starts, outside the sandbox, colima profile
-  `sbox-<folder>-<hash>` with the project as its only mount (rw, same path,
-  virtiofs), and sets `DOCKER_HOST` to its socket. virtiofs is pinned
-  because with sshfs a root guest can read any host file; it needs vz
-  (macOS 13+), so older Intel Macs fail to start (qemu would need 9p). The sandbox gets that socket only,
-  never `~/.colima`, so it can't change the mounts; don't add `~/.colima`
-  to `paths.conf`. `docker run -v "$PWD:/w"` works; other host paths
-  (symlinked `SHARED_RW` dirs too) appear empty in containers.
-- One VM per project (colima defaults: 2 CPUs, 2 GB, own image store). The
-  first start takes a minute. It keeps running after the session:
-  `colima list`, `colima stop -p <profile>`, `colima delete -p <profile>`.
+  may point into `~/.orbstack`). They keep working outside the sandbox.
+- Two VMs: yours (e.g. colima's `default` profile, mounting `~`) and colima
+  profile `sbox`, shared by all sandboxed projects. Images can't be shared
+  between two VMs, so an image used on both sides is stored twice, not once
+  per project. Copy it instead of pulling it again:
+  `docker save IMG | DOCKER_HOST=unix://$HOME/.colima/sbox/docker.sock docker load`
+- `-docker` starts `sbox`, outside the sandbox, with the project as its only
+  mount (rw, same path, virtiofs) and sets `DOCKER_HOST` to its socket.
+  virtiofs is pinned because with sshfs a root guest can read any host
+  file; it needs vz (macOS 13+), so older Intel Macs fail to start (qemu
+  would need 9p). The sandbox gets that socket only, never `~/.colima`, so
+  it can't change the mounts; don't add `~/.colima` to `paths.conf`.
+  `docker run -v "$PWD:/w"` works; other host paths (symlinked `SHARED_RW`
+  dirs too) appear empty in containers.
+- One project at a time: `-docker` in another project restarts `sbox` with
+  that mount (about 20 s, its running containers stop), and is refused while
+  a `-docker` session of a different project is still open. Sessions are
+  tracked in `~/.colima/sbox/sessions`.
+- The VM keeps running after the session: `colima stop -p sbox`. Size: colima
+  defaults (2 CPUs, 2 GB) unless your colima template says otherwise.
 - `~/.docker` stays hidden (credentials): each session gets a temporary
-  `DOCKER_CONFIG` linking the CLI plugins (compose, buildx), so a
-  `docker login` inside lasts one session.
+  `DOCKER_CONFIG` linking the CLI plugins (compose, buildx, from
+  `~/.docker/cli-plugins` or Homebrew), so a `docker login` inside lasts one
+  session.
 - The VM has its own network: containers bypass the network filter.
 - Linux: `-docker` is ignored.
 

@@ -95,29 +95,46 @@ if (( ${#SHARED_RW[@]} > 0 )); then
   done < <(find "$SANDBOX_DIR" -maxdepth 2 \( -name .git -o -name node_modules -o -name .venv \) -prune -o -type l -print 2>/dev/null)
 fi
 
-# ── docker via colima: one VM per project, mounting only the project ─────────
+# ── docker via colima: one shared VM, mounting only the current project ─────
 # docker = root in its VM, so the VM's mounts are the real boundary: OrbStack
-# shares the whole host filesystem, a default colima mounts ~. -docker starts
-# colima profile sbox-<dir>-<hash> with $SANDBOX_DIR as its only mount; the
-# sandbox gets that socket, never ~/.colima (editing colima.yaml from inside
-# could add mounts). The VM keeps running after exit: colima stop -p <profile>.
+# shares the whole host filesystem, a default colima mounts ~. -docker uses
+# colima profile "sbox" with $SANDBOX_DIR as its only mount. One VM keeps one
+# image store for all projects; the price is one project at a time: another
+# project restarts the VM with its own mount, refused while a -docker session
+# of a different project is open (that session would then see the new one).
+# The sandbox gets the socket, never ~/.colima (editing colima.yaml from
+# inside could add mounts), so the session/mount state lives there too.
+# The VM keeps running after exit: colima stop -p sbox.
 COLIMA_DIR="${COLIMA_HOME:-$HOME/.colima}"
 DOCKER_SOCK=""
 if [[ -n "${SBOX_DOCKER:-}" ]]; then
   command -v colima >/dev/null || { echo "aicode: -docker needs colima (brew install colima)" >&2; exit 1; }
-  # lima instance names allow single separators between alphanumerics only
-  _n="$(printf '%s' "${(L)SANDBOX_DIR:t}" | tr -cs 'a-z0-9' '-')"
-  _n="${${_n[1,16]#-}%-}"
-  _profile="sbox-${_n:+$_n-}$(printf '%s' "$SANDBOX_DIR" | shasum | cut -c1-6)"
-  if ! colima status -p "$_profile" >/dev/null 2>&1; then
-    echo "aicode: starting colima profile $_profile (mount: $SANDBOX_DIR)" >&2
-    # --activate=false: leave the host's docker context alone (e.g. OrbStack)
+  _vm="$COLIMA_DIR/sbox"
+  mkdir -p "$_vm/sessions"
+  # sessions/<launcher pid> holds its project; dead pids are leftovers
+  for f in "$_vm"/sessions/*(N); do
+    kill -0 "${f:t}" 2>/dev/null || { rm -f "$f"; continue; }
+    [[ "$(<"$f")" == "$SANDBOX_DIR" ]] || { echo "aicode: the docker VM is in use by $(<"$f") (session file $f); close that session or drop -docker" >&2; exit 1; }
+  done
+  DOCKER_SESSION="$_vm/sessions/$$"
+  print -r -- "$SANDBOX_DIR" > "$DOCKER_SESSION"
+  _running=0
+  colima status -p sbox >/dev/null 2>&1 && _running=1
+  if (( _running )) && [[ "$(cat "$_vm/mount" 2>/dev/null)" != "$SANDBOX_DIR" ]]; then
+    echo "aicode: restarting colima profile sbox to mount $SANDBOX_DIR" >&2
+    colima stop -p sbox || exit 1
+    _running=0
+  fi
+  if (( ! _running )); then
+    echo "aicode: starting colima profile sbox (mount: $SANDBOX_DIR)" >&2
+    # --activate=false: leave the host's docker context alone (your own VM)
     # --mount-type virtiofs: the hypervisor enforces the mount; sshfs (qemu
     # default, or a colima template) lets a root guest read any host path.
     # Needs vz (macOS 13+): fails instead of falling back; for qemu use 9p.
-    colima start -p "$_profile" --mount "$SANDBOX_DIR:w" --mount-type virtiofs --ssh-agent=false --activate=false || exit 1
+    colima start -p sbox --mount "$SANDBOX_DIR:w" --mount-type virtiofs --ssh-agent=false --activate=false || exit 1
+    print -r -- "$SANDBOX_DIR" > "$_vm/mount"
   fi
-  DOCKER_SOCK="$COLIMA_DIR/$_profile/docker.sock"
+  DOCKER_SOCK="$_vm/docker.sock"
   [[ -S "$DOCKER_SOCK" ]] || { echo "aicode: no docker socket at $DOCKER_SOCK" >&2; exit 1; }
   export DOCKER_HOST="unix://$DOCKER_SOCK"
   # ~/.docker stays hidden (registry credentials, other contexts); a session
@@ -125,7 +142,8 @@ if [[ -n "${SBOX_DOCKER:-}" ]]; then
   # "Error loading config file" warning
   DOCKDIR="$(mktemp -d /tmp/sbox-docker-XXXXXX)"
   mkdir "$DOCKDIR/cli-plugins"
-  for p in "$HOME"/.docker/cli-plugins/*(N); do ln -s "${p:A}" "$DOCKDIR/cli-plugins/${p:t}"; done
+  # brew's docker-compose/buildx install into $BREW/lib; ~/.docker wins
+  for p in "$BREW"/lib/docker/cli-plugins/*(N) "$HOME"/.docker/cli-plugins/*(N); do ln -sf "${p:A}" "$DOCKDIR/cli-plugins/${p:t}"; done
   export DOCKER_CONFIG="$DOCKDIR"
 fi
 
@@ -222,7 +240,7 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
   # container VMs share host dirs with root containers: OrbStack (all of it,
   # also behind /var/run/docker.sock), other colima profiles, lima (~ by
   # default; its ssh ControlMaster sockets give a shell in the VM). Denied
-  # even with NET_FILTER=0; only this project's colima socket gets through.
+  # even with NET_FILTER=0; only the sbox profile's socket gets through.
   printf '(deny network-outbound (remote unix-socket (subpath "%s")))\n' "$HOME/.orbstack" "$COLIMA_DIR" "$HOME/.lima"
   if [[ -n "$DOCKER_SOCK" ]]; then
     printf '(allow file-read* file-write* (literal "%s"))\n' "$DOCKER_SOCK"
@@ -237,6 +255,7 @@ cleanup() {
   [[ -n "${NETPID:-}" ]] && kill "$NETPID" 2>/dev/null
   [[ -n "${NETDIR:-}" ]] && rm -rf "$NETDIR"
   [[ -n "${DOCKDIR:-}" ]] && rm -rf "$DOCKDIR"
+  [[ -n "${DOCKER_SESSION:-}" ]] && rm -f "$DOCKER_SESSION"
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
   return 0
