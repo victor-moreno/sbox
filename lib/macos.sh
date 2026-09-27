@@ -112,7 +112,10 @@ if [[ -n "${SBOX_DOCKER:-}" ]]; then
   if ! colima status -p "$_profile" >/dev/null 2>&1; then
     echo "aicode: starting colima profile $_profile (mount: $SANDBOX_DIR)" >&2
     # --activate=false: leave the host's docker context alone (e.g. OrbStack)
-    colima start -p "$_profile" --mount "$SANDBOX_DIR:w" --ssh-agent=false --activate=false || exit 1
+    # --mount-type virtiofs: the hypervisor enforces the mount; sshfs (qemu
+    # default, or a colima template) lets a root guest read any host path.
+    # Needs vz (macOS 13+): fails instead of falling back; for qemu use 9p.
+    colima start -p "$_profile" --mount "$SANDBOX_DIR:w" --mount-type virtiofs --ssh-agent=false --activate=false || exit 1
   fi
   DOCKER_SOCK="$COLIMA_DIR/$_profile/docker.sock"
   [[ -S "$DOCKER_SOCK" ]] || { echo "aicode: no docker socket at $DOCKER_SOCK" >&2; exit 1; }

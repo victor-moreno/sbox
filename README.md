@@ -235,8 +235,10 @@ gives the sandbox a docker daemon that only sees the project folder.
   `~/.lima` are denied, also with `NET_FILTER=0` (`/var/run/docker.sock`
   points into `~/.orbstack`). OrbStack keeps working outside the sandbox.
 - `-docker` starts, outside the sandbox, colima profile
-  `sbox-<folder>-<hash>` with the project as its only mount (rw, same path),
-  and sets `DOCKER_HOST` to its socket. The sandbox gets that socket only,
+  `sbox-<folder>-<hash>` with the project as its only mount (rw, same path,
+  virtiofs), and sets `DOCKER_HOST` to its socket. virtiofs is pinned
+  because with sshfs a root guest can read any host file; it needs vz
+  (macOS 13+), so older Intel Macs fail to start (qemu would need 9p). The sandbox gets that socket only,
   never `~/.colima`, so it can't change the mounts; don't add `~/.colima`
   to `paths.conf`. `docker run -v "$PWD:/w"` works; other host paths
   (symlinked `SHARED_RW` dirs too) appear empty in containers.
