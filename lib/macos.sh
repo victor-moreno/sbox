@@ -100,8 +100,8 @@ fi
 # shares the whole host filesystem, a default colima mounts ~. -docker uses
 # colima profile "sbox" with $SANDBOX_DIR as its only mount. One VM keeps one
 # image store for all projects; the price is one project at a time: another
-# project restarts the VM with its own mount, refused while a -docker session
-# of a different project is open (that session would then see the new one).
+# project restarts the VM with its own mount, and runs without docker while a
+# -docker session of a different project is open (that one would see the mount).
 # The sandbox gets the socket, never ~/.colima (editing colima.yaml from
 # inside could add mounts), so the session/mount state lives there too.
 # The VM keeps running after exit: colima stop -p sbox.
@@ -114,8 +114,14 @@ if [[ -n "${SBOX_DOCKER:-}" ]]; then
   # sessions/<launcher pid> holds its project; dead pids are leftovers
   for f in "$_vm"/sessions/*(N); do
     kill -0 "${f:t}" 2>/dev/null || { rm -f "$f"; continue; }
-    [[ "$(<"$f")" == "$SANDBOX_DIR" ]] || { echo "aicode: the docker VM is in use by $(<"$f") (session file $f); close that session or drop -docker" >&2; exit 1; }
+    # busy with another project: carry on without docker rather than exit
+    [[ "$(<"$f")" == "$SANDBOX_DIR" ]] || { DOCKER_BUSY="$(<"$f")"; break; }
   done
+fi
+if [[ -n "${DOCKER_BUSY:-}" ]]; then
+  DOCKER_BUSY_MSG="aicode: -docker off for this session: the docker VM is in use by $DOCKER_BUSY (close that session, then relaunch with -docker)"
+  echo "$DOCKER_BUSY_MSG" >&2
+elif [[ -n "${SBOX_DOCKER:-}" ]]; then
   DOCKER_SESSION="$_vm/sessions/$$"
   print -r -- "$SANDBOX_DIR" > "$DOCKER_SESSION"
   _running=0
@@ -256,6 +262,8 @@ cleanup() {
   [[ -n "${NETDIR:-}" ]] && rm -rf "$NETDIR"
   [[ -n "${DOCKDIR:-}" ]] && rm -rf "$DOCKDIR"
   [[ -n "${DOCKER_SESSION:-}" ]] && rm -f "$DOCKER_SESSION"
+  # repeated at exit: the coder's UI may have drawn over the one at launch
+  [[ -n "${DOCKER_BUSY_MSG:-}" ]] && echo "$DOCKER_BUSY_MSG" >&2
   rm -f "$POLICY"
   [[ -n "$ZDOT" ]] && rm -rf "$ZDOT"
   return 0

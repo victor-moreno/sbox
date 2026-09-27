@@ -248,8 +248,9 @@ gives the sandbox a docker daemon that only sees the project folder.
   `docker run -v "$PWD:/w"` works; other host paths (symlinked `SHARED_RW`
   dirs too) appear empty in containers.
 - One project at a time: `-docker` in another project restarts `sbox` with
-  that mount (about 20 s, its running containers stop), and is refused while
-  a `-docker` session of a different project is still open. Sessions are
+  that mount (about 20 s, its running containers stop). While a `-docker`
+  session of a different project is still open it starts without docker
+  instead, with a message at launch and again at exit. Sessions are
   tracked in `~/.colima/sbox/sessions`.
 - The VM keeps running after the session: `colima stop -p sbox`. Size: colima
   defaults (2 CPUs, 2 GB) unless your colima template says otherwise.

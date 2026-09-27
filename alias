@@ -7,6 +7,8 @@ claude() {
   fi
   local args=""
   for a in "$@"; do args+=" $(printf '%q' "$a")"; done
+  # a failed launch (e.g. -docker refused) would close the pane with its error unread
+  args+=" || { printf '\\n[exit %s] press Enter to close' \$?; read _; }"
   if [ -n "$TMUX" ]; then
     # already inside tmux: nesting is refused, so create detached and switch to it
     name="${name//[.:]/_}"  # tmux rewrites . and : in session names
@@ -28,6 +30,8 @@ claudeUB() {
   fi
   local args=""
   for a in "$@"; do args+=" $(printf '%q' "$a")"; done
+  # a failed launch (e.g. -docker refused) would close the pane with its error unread
+  args+=" || { printf '\\n[exit %s] press Enter to close' \$?; read _; }"
   if [ -n "$TMUX" ]; then
     # already inside tmux: nesting is refused, so create detached and switch to it
     name="${name//[.:]/_}"  # tmux rewrites . and : in session names
