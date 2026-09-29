@@ -42,6 +42,7 @@ MAX_REQUEST = 8 << 20
 MAX_SCRIPT = 2 << 20          # base64 in the launcher must stay under sbatch's 4 MB
 MAX_ARRAY = 10001             # MaxArraySize on odap (SLURM.md phase 0)
 CTRL = re.compile(r"[\x00-\x1f\x7f]")
+SIGNAL_RE = re.compile(r"^B:(SIG)?(USR1|USR2|HUP|TERM)(@[0-9]{1,5})?$")
 
 
 class Refused(Exception):
@@ -75,6 +76,7 @@ OPTS = {
     "chdir": ("D", "arg", "io"), "wrap": (None, "arg", "wrap"),
     "help": ("h", "flag", "help"), "usage": (None, "flag", "help"),
     "version": ("V", "flag", "version"),
+    "signal": (None, "arg", "signal"),
 }
 SHORT = dict((v[0], k) for k, v in OPTS.items() if v[0])
 
@@ -199,8 +201,7 @@ if [ -n "$cg" ] && [ -d "/sys/fs/cgroup/freezer$cg" ]; then
   done
 fi
 jt=$(mktemp -d "${TMPDIR:-/tmp}/sbox-job-$SLURM_JOB_ID.XXXXXX") || exit 96
-trap 'rm -rf "$jt"' EXIT
-trap 'exit 143' TERM
+trap 'rm -rf "$jt" "$jt.info"' EXIT
 env=(%(env)s)
 while IFS= read -r -d '' kv; do
   case $kv in SLURM_*|SLURMD_NODENAME=*|CUDA_VISIBLE_DEVICES=*|ROCR_VISIBLE_DEVICES=*|GPU_DEVICE_ORDINAL=*) env+=("$kv") ;; esac
@@ -209,10 +210,28 @@ done < <(env -0)
 env+=(%(submit_dir)s)
 exec 8< <(base64 -d <<<'%(inner)s')
 exec 9< <(base64 -d <<<'%(script)s')
-"$B" %(layout)s --bind "$jt" /tmp "${dev[@]}" \
+# In the background so signals for the batch shell (--signal=B:..., scancel -b -s)
+# can be passed on: bwrap doesn't forward them, and its pid-1 helper ignores
+# them, so they go to the helper's children, i.e. the user script (B: = only
+# the batch script, as without sbox). INT/QUIT can't be: bash ignores them in
+# background commands, and a script can't trap what was ignored at its start.
+"$B" --info-fd 7 %(layout)s --bind "$jt" /tmp "${dev[@]}" \
   --dir /run/sbox-job --ro-bind-data 8 /run/sbox-job/inner --ro-bind-data 9 /run/sbox-job/script \
   --chdir %(chdir)s /usr/bin/env -i "${env[@]}" \
-  /bin/bash /run/sbox-job/inner %(inner_args)s
+  /bin/bash /run/sbox-job/inner %(inner_args)s 7>"$jt.info" &
+bp=$!
+fwd() {
+  local c
+  c=$(sed -n 's/.*"child-pid": *\([0-9][0-9]*\).*/\1/p' "$jt.info" 2>/dev/null)
+  [ -n "$c" ] && pkill -"$1" -P "$c"
+}
+for s in USR1 USR2 HUP TERM; do trap "fwd $s" "$s"; done
+# a trapped signal interrupts wait; keep waiting until bwrap has been reaped
+while :; do
+  wait "$bp"; rc=$?
+  kill -0 "$bp" 2>/dev/null || break
+done
+exit $rc
 '''
 
 
@@ -360,6 +379,12 @@ def plan_sbatch(cfg, argv, script, cwd):
             info["array"] = v
             info["count"], info["throttle"] = array_count(v)
             sb.append("--array=" + v)
+        elif cls == "signal":
+            # only B: (the batch script, which the launcher forwards to the user
+            # script): without it Slurm signals job steps, and there are none
+            if not SIGNAL_RE.match(v):
+                raise Refused("--signal must be B:<sig>[@seconds], sig one of USR1 USR2 HUP TERM")
+            sb.append("--signal=" + v)
         elif cls == "wait":
             sb.append("--wait")
         elif cls == "test":

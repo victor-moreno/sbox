@@ -242,6 +242,8 @@ no agent config, no ssh and no network. Design, limits and tests: SLURM.md.
 - `SLURM_MAX_RUNNING` (default 20) caps sbox jobs + array tasks, running or
   pending, across all sessions: arrays get a `%N` throttle to fit, and sbatch
   is refused when it's used up.
+- `--signal=B:USR1@120` (or USR2, HUP, TERM) and `scancel -b -s USR1 <job>`
+  reach the script, e.g. to checkpoint before the time limit.
 - Launcher messages (e.g. a node without usable bwrap: the job fails with exit
   97 without running) go to `~/.local/state/sbox/slurm/logs/<project>-<hash>/`,
   readable from the sandbox; the job's own `-o/-e` go where you asked.

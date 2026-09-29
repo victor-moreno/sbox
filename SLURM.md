@@ -193,7 +193,8 @@ SLURM_CONSTRAINT=""       # node feature, if the admins tag bwrap nodes; ANDed w
 | | `-w/--nodelist` | allowed; `--exclude` still added |
 | control | `-J/--job-name` (no `/`) `-a/--array` `-d/--dependency` `-H/--hold` `--begin` `--deadline` `--requeue` `--no-requeue` `--mail-type` `--mail-user` `--parsable` `-Q/--quiet` `-W/--wait` `--test-only` | `--test-only` isn't recorded in the ledger |
 | I/O (handled by the launcher, inside bwrap) | `-o/--output` `-e/--error` `-i/--input` `--open-mode` `-D/--chdir` `--wrap` | Slurm itself gets `--output/--error=<LOGDIR>/%j.log` (`%A_%a.log` for arrays) and `--chdir=<LOGDIR>` |
-| refused | `--export` `--export-file` `--get-user-env` `--uid` `--gid` `--container` `--bb` `--bbf` `--signal` `--comment` `--wckey`, everything not listed | `--signal` could come later (bwrap signal forwarding untested) |
+| signals | `--signal=B:<USR1\|USR2\|HUP\|TERM>[@secs]` | only `B:`: without it Slurm signals job steps, and there are none. The launcher forwards these signals (also from `scancel -b -s`) to the user script (added 2026-09-29) |
+| refused | `--export` `--export-file` `--get-user-env` `--uid` `--gid` `--container` `--bb` `--bbf` `--comment` `--wckey`, everything not listed | |
 
 Why Slurm's own output goes to a broker dir: slurmstepd opens `-o/-e` as the
 user **before** bwrap starts and follows symlinks, so `-o ~/.bashrc`, or a
@@ -336,6 +337,8 @@ Must work:
 ## Known limits
 
 - No MPI / multi-node, no interactive jobs, no job steps (`srun` inside a job).
+- Signals to the batch script: only USR1, USR2, HUP, TERM reach the user script
+  (the launcher runs bwrap in the background, where bash ignores INT/QUIT).
 - Jobs have no network.
 - `$HOME` inside a job is a tmpfs plus the paths.conf binds, like the
   interactive sandbox: writes elsewhere in `$HOME` vanish.
