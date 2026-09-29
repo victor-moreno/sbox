@@ -57,11 +57,18 @@ CODER_RW_HERMES="$HOME/.hermes"
 # project, which forced a /login in every new folder (see lib/macos.sh).
 CODER_PROJECT_ISOLATION="claude"
 
-# Slurm/munge access inside the sandbox (Linux only). When 1, sbatch/squeue/
-# etc. can reach /run/slurm/conf and the munge auth socket, so job submission
-# works the same as outside the sandbox. Set to 0 to block it: sbatch is still
-# on PATH (it's just /usr/bin/sbatch) but has no config/auth to submit with.
+# Slurm inside the sandbox (Linux only; `aicode -sl` = broker, `-slurm` = 1).
+#   broker  sbatch & co are shims to a broker outside the sandbox, which
+#           validates each submission and runs the job inside bwrap on the
+#           compute node (no munge in the sandbox, see SLURM.md)
+#   1       direct: sbatch/squeue/etc. reach /run/slurm/conf and the munge
+#           socket, so jobs run unsandboxed and the network filter is advisory
+#   0       blocked: sbatch is still on PATH but has no config/auth
 ENABLE_SLURM=0
+# broker mode: nodes without a usable bwrap (Slurm hostlist, added as
+# --exclude), or a node feature marking the good ones (ANDed with the job's -C)
+SLURM_EXCLUDE=""
+SLURM_CONSTRAINT=""
 
 # GPU access inside the sandbox (Linux only). When 1, the host's /dev/nvidia*
 # devices, a read-only /sys/module and a /dev/shm tmpfs are bound in, so CUDA
@@ -94,8 +101,8 @@ PATH_EXTRA=(
 # Patterns: "host" exact, "*.host" subdomains, "!pattern" deny without asking.
 # HTTPS is not decrypted: allowing a host allows any traffic to it.
 # macOS: direct connections other than localhost are blocked by Seatbelt.
-# Linux: the sandbox gets its own network namespace, except with slurm
-# enabled (slurmctld needs direct TCP), where the filter is advisory only.
+# Linux: the sandbox gets its own network namespace, except with direct slurm
+# (ENABLE_SLURM=1: slurmctld needs direct TCP), where the filter is advisory only.
 # Tools that ignore HTTP(S)_PROXY get no network. 0 disables all of this.
 NET_FILTER=1
 # Unix sockets reachable despite the filter (macOS). Seatbelt resolves

@@ -35,6 +35,8 @@ Rule that drives the design: **the sandbox never holds a munge credential.**
   Once it works, `-sl` switches to the broker.
 - The user launches the dev session with `-sl` (direct munge) so real jobs can
   be submitted while developing.
+- Flags (user, 2026-09-29, phase 3): `-sl` = broker, `-slurm`/`--slurm` = direct
+  munge (the former `-sl`). No separate `-slb`.
 
 ## Architecture
 
@@ -57,7 +59,7 @@ Rule that drives the design: **the sandbox never holds a munge credential.**
 - Python 3 stdlib only, same style as `lib/netproxy.py`. Started by
   `linux.sh` outside bwrap with `--watch-pid $$`, dies with the session.
   Jobs already submitted keep running (they are self-contained).
-- Listens on `$SLURMDIR/sock` (`SLURMDIR=$(mktemp -d /tmp/sbox-slurm-XXXXXX)`,
+- Listens on `$SLURMDIR/sock/sock` (`SLURMDIR=$(mktemp -d /tmp/sbox-slurm-XXXXXX)`,
   mode 700), bound into the sandbox at `/run/sbox-slurm/`.
 - Protocol: one JSON line per connection.
   Request `{"cmd", "argv", "cwd", "script"}`, reply `{"rc", "stdout", "stderr"}`.
@@ -147,15 +149,15 @@ Job layout vs interactive layout:
 
 - Refactor the bwrap arg building into a function used for both layouts, so
   interactive and job layouts can't drift apart.
-- `ENABLE_SLURM` values: `0` off, `1` direct (current), `broker` (new, dev);
-  `aicode` `-slb` sets `SBOX_SLURM=broker`. `sbox` (shell) uses paths.conf.
+- `ENABLE_SLURM` values: `0` off, `1` direct, `broker`;
+  `aicode -sl` sets `SBOX_SLURM=broker`, `-slurm` sets `1`. `sbox` (shell) uses paths.conf.
 - Broker mode:
   - no `/run/munge`, no `/run/slurm/conf` binds;
   - network block takes the strict branch (`--unshare-net`, `NET_FORWARD=1`), as
     without slurm, so the `SSH_DIR` ssh config also gets the netproxy
     `ProxyCommand` again (today slurm mode leaves ssh direct);
   - write `$SLURMDIR/layout` and `$SLURMDIR/env`, start the broker, wait for
-    the socket (like netproxy), bind `$SLURMDIR` at `/run/sbox-slurm`;
+    the socket (like netproxy), bind only `$SLURMDIR/sock` at `/run/sbox-slurm` (snapshots and temp launchers stay out of reach);
   - bind the shim over each slurm client binary;
   - bind `~/.local/state/sbox` **RO, after USER_BINDS** (later binds win), so
     the ledger stays read-only even if paths.conf makes `~/.local` RW.
@@ -272,19 +274,24 @@ the cluster's system python3)
   `SLURM_SUBMIT_DIR` reset to the caller's cwd; default job name = script basename)
 - [x] functional test inside the dev session (broker running there has munge)
 
-Phase 3: `linux.sh` integration behind `ENABLE_SLURM=broker` / `-slb`
-- [ ] layout function refactor (interactive layout unchanged: compare bwrap argv before/after)
-- [ ] broker start, socket, shim binds, strict network, RO state dir, LOGDIR bind
+Phase 3: `linux.sh` integration behind `ENABLE_SLURM=broker` / `-sl` — done 2026-09-29
+- [x] layout function refactor (interactive layout unchanged: compare bwrap argv before/after)
+  (`bwrap_fs interactive|job` + `PROJECT_TAIL`; argv byte-identical for shell/claude ×
+  off/direct, checked with a fake bwrap on PATH)
+- [x] broker start, socket, shim binds, strict network, RO state dir, LOGDIR bind
+  (only `$SLURMDIR/sock` is bound in, at `/run/sbox-slurm`; layout/env snapshots and temp
+  launchers stay in `$SLURMDIR`, out of the sandbox's reach. End to end in a nested
+  sandbox: no munge, shim, ledger RO, jobs 206370/206371 ok, broker exits and cleans up)
 
 Phase 4: budget + ledger (locking, pruning, clamping, refusal)
 
-Phase 5: acceptance, from a session the user starts with `claude -slb`, in a
+Phase 5: acceptance, from a session the user starts with `claude -sl`, in a
 **separate scratch project** (not this repo, which the sandbox can edit)
 
-Phase 6: switch `-sl` to the broker; README + `paths.conf.example`; decide
-whether direct mode stays (e.g. `ENABLE_SLURM=direct`) or goes.
+Phase 6: README + `paths.conf.example` (flags already done in phase 3); decide
+whether direct mode (`-slurm`, `ENABLE_SLURM=1`) stays or goes.
 
-## Acceptance tests (from inside a `-slb` sandbox)
+## Acceptance tests (from inside a `-sl` sandbox)
 
 Must fail or be refused:
 - [ ] `ls /run/munge`, `munge -n` → not there

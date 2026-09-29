@@ -11,8 +11,9 @@ SBOX_ROOT="${SBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd -P)}
 # load user-editable whitelist
 # shellcheck disable=SC1091
 . "$SBOX_ROOT/paths.conf"
-# `aicode <coder> -sl` sets SBOX_SLURM=1; it wins over paths.conf's value
-[ "${SBOX_SLURM:-}" = "1" ] && ENABLE_SLURM=1
+# `aicode <coder> -sl` sets SBOX_SLURM=broker, `-slurm` SBOX_SLURM=1 (direct
+# munge); either wins over paths.conf's value
+[ -n "${SBOX_SLURM:-}" ] && ENABLE_SLURM="$SBOX_SLURM"
 
 # ── helper: get newline-delimited coder paths from CODER_RW_<CODER> ──────────
 # Config uses uppercase keys (CODER_RW_CLAUDE), coder name is lowercased.
@@ -169,7 +170,7 @@ if [ "${NET_FILTER:-1}" = "1" ]; then
     --hint "Allow it outside the sandbox: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf")
   for _h in "${NET_ALLOW[@]+"${NET_ALLOW[@]}"}"; do _net_args+=(--allow="$_h"); done
   if [ "${ENABLE_SLURM:-1}" = "1" ]; then
-    echo "aicode: slurm enabled, network filter is advisory only (direct connections not blocked)" >&2
+    echo "aicode: direct slurm (-slurm), network filter is advisory only (direct connections not blocked)" >&2
     python3 "$SBOX_ROOT/lib/netproxy.py" "${_net_args[@]}" --port-file "$NETDIR/port" \
       </dev/null >/dev/null 2>>"$_netlog" &
     for _i in $(seq 50); do [ -s "$NETDIR/port" ] && break; sleep 0.1; done
@@ -293,48 +294,70 @@ RCEOF
 trap 'rm -rf "$RC_FILE" "${SSH_TMP:-}"' EXIT INT TERM
 
 # ── bwrap mount layout ───────────────────────────────────────────────────────
+# bwrap_fs <interactive|job> sets FS: the filesystem view, shared with the
+# slurm jobs of broker mode so the two can't drift apart. Jobs (SLURM.md,
+# "Job layout") get the same paths minus agent config, ssh and the terminal,
+# with -try binds since a compute node may lack some paths.conf entries.
+bwrap_fs() {
+  FS=(
+    --tmpfs /
+    "${DIR_CHAIN[@]}"
+    --ro-bind /usr /usr
+    --ro-bind /etc /etc
+    --symlink usr/bin /bin
+    --symlink usr/lib /lib
+    --symlink usr/lib64 /lib64
+    --symlink usr/sbin /sbin
+    --ro-bind /opt /opt
+    --dir "$HOME"
+  )
+  if [ "$1" = job ]; then
+    for _p in "${RO[@]}"; do FS+=(--ro-bind-try "$_p" "$_p"); done
+    for _p in "${RW[@]}"; do FS+=(--bind-try "$_p" "$_p"); done
+    [ "${#CONDA_BWRAP[@]}" -gt 0 ] && FS+=(--ro-bind-try "$HOME/.conda" "$HOME/.conda")
+  else
+    FS+=(
+      "${USER_BINDS[@]}"
+      "${CODER_BWRAP[@]}"
+      "${CONDA_BWRAP[@]}"
+      "${PROJECT_BWRAP[@]}"
+      # after the coder binds: SSH_DIR stays read-only even when it sits inside a
+      # coder's RW config dir (e.g. ~/.claude/.ssh), so the key can't be rewritten
+      "${SSH_BWRAP[@]}"
+    )
+  fi
+  FS+=(--proc /proc)
+
+  # Minimal /dev — only essential devices instead of full /dev exposure
+  FS+=(--dir /dev)
+  # The /proc-backed links every real /dev has, which a bare --dir /dev lacks:
+  # without /dev/fd, bash process substitution (`cmd <(cmd)`) fails inside the
+  # sandbox. They expose nothing new — /proc is already mounted.
+  FS+=(
+    --symlink /proc/self/fd /dev/fd
+    --symlink /proc/self/fd/0 /dev/stdin
+    --symlink /proc/self/fd/1 /dev/stdout
+    --symlink /proc/self/fd/2 /dev/stderr
+  )
+  # batch jobs have no terminal
+  [ "$1" != job ] && [ -d /dev/pts ] && FS+=(--bind /dev/pts /dev/pts)
+  for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
+    [ "$1" = job ] && [ "$_d" = /dev/tty ] && continue
+    # --dev-bind (not --bind) required for char devices: --bind sets MS_NODEV
+    # which blocks device file access on older kernels (e.g. 4.18).
+    [ -e "$_d" ] && FS+=(--dev-bind "$_d" "$_d")
+  done
+  return 0
+}
+
+bwrap_fs interactive
 BWRAP_BASE=(
   # Without this, the sandbox shares the host PID namespace: every host
   # process is visible under /proc (leaking other processes' cmdlines) and
   # signalable (e.g. kill -0 succeeds against host PIDs owned by this user).
   --unshare-pid
-  --tmpfs /
-  "${DIR_CHAIN[@]}"
-  --ro-bind /usr /usr
-  --ro-bind /etc /etc
-  --symlink usr/bin /bin
-  --symlink usr/lib /lib
-  --symlink usr/lib64 /lib64
-  --symlink usr/sbin /sbin
-  --ro-bind /opt /opt
-  --dir "$HOME"
-  "${USER_BINDS[@]}"
-  "${CODER_BWRAP[@]}"
-  "${CONDA_BWRAP[@]}"
-  "${PROJECT_BWRAP[@]}"
-  # after the coder binds: SSH_DIR stays read-only even when it sits inside a
-  # coder's RW config dir (e.g. ~/.claude/.ssh), so the key can't be rewritten
-  "${SSH_BWRAP[@]}"
-  --proc /proc
+  "${FS[@]}"
 )
-
-# Minimal /dev — only essential devices instead of full /dev exposure
-BWRAP_BASE+=(--dir /dev)
-# The /proc-backed links every real /dev has, which a bare --dir /dev lacks:
-# without /dev/fd, bash process substitution (`cmd <(cmd)`) fails inside the
-# sandbox. They expose nothing new — /proc is already mounted.
-BWRAP_BASE+=(
-  --symlink /proc/self/fd /dev/fd
-  --symlink /proc/self/fd/0 /dev/stdin
-  --symlink /proc/self/fd/1 /dev/stdout
-  --symlink /proc/self/fd/2 /dev/stderr
-)
-[ -d /dev/pts ] && BWRAP_BASE+=(--bind /dev/pts /dev/pts)
-for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
-  # --dev-bind (not --bind) required for char devices: --bind sets MS_NODEV
-  # which blocks device file access on older kernels (e.g. 4.18).
-  [ -e "$_d" ] && BWRAP_BASE+=(--dev-bind "$_d" "$_d")
-done
 
 # NVIDIA/CUDA (toggled by ENABLE_GPU in paths.conf, and only when the host
 # has the devices): the char devices plus
@@ -384,7 +407,8 @@ fi
 # after --tmpfs /run, which would hide these mounts
 BWRAP_BASE+=("${NET_BWRAP[@]+"${NET_BWRAP[@]}"}")
 
-BWRAP_BASE+=(
+# also the tail of the job layout (broker mode)
+PROJECT_TAIL=(
   # SANDBOX_DIR bound last (after /tmp and /run are remounted, and after every
   # other bind above) so it always wins RW: bwrap remounts recursively, so an
   # earlier SANDBOX_DIR bind would get shadowed back by a later mount over
@@ -395,6 +419,9 @@ BWRAP_BASE+=(
   # the allowlists stay read-only even when the project is sbox itself
   --ro-bind-try "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/paths.conf"
   --ro-bind-try "$SBOX_ROOT/net-allow.conf" "$SBOX_ROOT/net-allow.conf"
+)
+BWRAP_BASE+=(
+  "${PROJECT_TAIL[@]}"
   # Bound after SANDBOX_DIR so this stays visible even in the edge case where
   # SANDBOX_DIR is /tmp itself (which would otherwise shadow it).
   --bind "$RC_FILE" /tmp/sandbox-rc
@@ -462,6 +489,56 @@ ENV_BASE=(
   DISABLE_TELEMETRY="1"
   DISABLE_ERROR_REPORTING="1" 
 )
+
+# ── slurm broker (ENABLE_SLURM=broker, design in SLURM.md) ───────────────────
+# The sandbox never gets munge: sbatch & co are shims (lib/slurmproxy.py
+# bound over each client) talking over a unix socket to the broker outside,
+# which submits each script wrapped in bwrap with the job layout below. Only
+# the socket's dir is bound in; the layout/env snapshots and the temp
+# launchers stay out of reach, so they can't be swapped before sbatch reads
+# them. The network takes the strict branch above, as without slurm.
+if [ "${ENABLE_SLURM:-1}" = "broker" ]; then
+  _state="$HOME/.local/state/sbox"
+  # Slurm's own -o/-e (launcher messages) go here, never into the project:
+  # slurmstepd opens them on the host before bwrap and follows symlinks
+  _logdir="$_state/slurm/logs/$(basename "$SANDBOX_DIR")-$(printf '%s' "$SANDBOX_DIR" | sha256sum | cut -c1-8)"
+  mkdir -p "$_logdir"
+  # after the mkdir above, so a failure there leaves no temp dir behind
+  SLURMDIR="$(mktemp -d /tmp/sbox-slurm-XXXXXX)"
+  mkdir "$SLURMDIR/sock" "$SLURMDIR/launch"
+  bwrap_fs job
+  printf '%s\0' --unshare-pid --unshare-net --new-session --die-with-parent \
+    "${FS[@]}" --tmpfs /run "${PROJECT_TAIL[@]}" > "$SLURMDIR/layout"
+  # no proxy, coder or terminal vars: jobs have no network and no agent
+  _job_env=(SBOX_JOB=1)
+  for _e in "${ENV_BASE[@]}"; do
+    case "${_e%%=*}" in
+      HOME|USER|LOGNAME|SHELL|LANG|LC_ALL|TMPDIR|SANDBOX_DIR|PATH|CONDA_EXE|CONDA_PYTHON_EXE|DISABLE_*)
+        _job_env+=("$_e") ;;
+    esac
+  done
+  printf '%s\0' "${_job_env[@]}" > "$SLURMDIR/env"
+  _sl_args=(serve --unix "$SLURMDIR/sock/sock" --layout "$SLURMDIR/layout" --env "$SLURMDIR/env"
+    --inner "$SBOX_ROOT/lib/slurm-inner.sh" --project "$SANDBOX_DIR" --logdir "$_logdir"
+    --statedir "$SLURMDIR/launch" --ledger "$_state/slurm/ledger.json"
+    --exclude "${SLURM_EXCLUDE:-}" --constraint "${SLURM_CONSTRAINT:-}"
+    --watch-pid $$ --cleanup "$SLURMDIR")
+  _bw="$(command -v bwrap)" && _sl_args+=(--bwrap "$_bw")
+  [ "${ENABLE_GPU:-1}" = "1" ] && _sl_args+=(--gpu)
+  python3 "$SBOX_ROOT/lib/slurmproxy.py" "${_sl_args[@]}" \
+    </dev/null >/dev/null 2>>"$_state/slurm/broker.log" &
+  for _i in $(seq 50); do [ -S "$SLURMDIR/sock/sock" ] && break; sleep 0.1; done
+  [ -S "$SLURMDIR/sock/sock" ] || { rm -rf "$SLURMDIR"; echo "aicode: slurm broker did not start, see $_state/slurm/broker.log" >&2; exit 1; }
+  BWRAP_BASE+=(
+    --bind "$SLURMDIR/sock" /run/sbox-slurm
+    # after USER_BINDS (later binds win): ledger and logs stay read-only even
+    # if paths.conf makes ~/.local RW; the logs are readable for launcher errors
+    --ro-bind "$_state" "$_state"
+  )
+  for _c in sbatch scancel scontrol squeue sinfo sacct sstat sprio sshare srun salloc; do
+    _p="$(command -v "$_c")" && BWRAP_BASE+=(--ro-bind "$SBOX_ROOT/lib/slurmproxy.py" "$_p")
+  done
+fi
 
 # ── exec ─────────────────────────────────────────────────────────────────────
 if [ "$CODER" != "shell" ]; then

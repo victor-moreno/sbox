@@ -17,8 +17,10 @@ alias claude-share='$DIR/claude-share'  # share ~/.claude with ~/.claudeUB
 aicode claude        # Claude Code in a sandbox
 aicode hermes        # Hermes Agent in a sandbox
 aicode <any-cmd>     # any command on PATH or in homebrew
-claude -sl -c        # enable slurm/munge access for this launch (Linux),
-                     # overriding ENABLE_SLURM=0; other args go to claude
+claude -sl -c        # slurm via the broker for this launch (Linux): jobs run
+                     # sandboxed, see SLURM.md; other args go to claude
+claude -slurm        # direct slurm/munge access (unsandboxed jobs, advisory
+                     # network filter); both override ENABLE_SLURM
 claude -local        # use a model served at localhost:8000 instead of the
                      # API; fails if nothing is serving
 claude -docker       # docker via a colima VM that mounts only this folder
@@ -186,7 +188,7 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
   localhost, unix sockets outside the project, and DNS lookups. On Linux,
   bwrap gets `--unshare-net`, and a forwarder inside the sandbox links
   `127.0.0.1:3128` to the proxy socket. With `-local`, the model server's
-  localhost port is bridged the same way (and only that port). With slurm enabled, Linux keeps the
+  localhost port is bridged the same way (and only that port). With direct slurm (`-slurm`), Linux keeps the
   host network (slurmctld needs direct TCP), so only tools that honour
   `*_PROXY` are filtered.
 - Tools that ignore `*_PROXY` get no network (raw sockets, some node apps).
@@ -208,7 +210,7 @@ real config first (per-host settings there win) and then adds a global
 with `--unshare-net` the proxy is both the only route out and the only
 resolver. The target host therefore needs to be in `NET_ALLOW` /
 `net-allow.conf` like any other, and it is logged the same way
-(`git.iconcologia.net:22`). Without the filter, or with slurm enabled,
+(`git.iconcologia.net:22`). Without the filter, or with direct slurm (`-slurm`),
 connections are direct and no `ProxyCommand` is added.
 
 `/etc/ssh/ssh_config` is shadowed with an empty file at the same time: bwrap
