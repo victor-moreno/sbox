@@ -294,7 +294,8 @@ Phase 5: acceptance, from a session the user starts with `claude -sl`, in a
 **separate scratch project** (not this repo, which the sandbox can edit)
 — run 2026-09-29 in `~/app/claude` on compute-01: 45 passed, 0 failed
 (script `.tmp/phase5/acceptance.sh`, local; `~/.bashrc` replaced by a canary file,
-`scancel` of a foreign job tested with a fake ID). Host-side canary check pending.
+`scancel` of a foreign job tested with a fake ID); host check (`hostcheck.sh verify`): canary
+unchanged, no `~/sbox-pwned`. Done.
 
 Phase 6: README + `paths.conf.example` (flags already done in phase 3); decide
 whether direct mode (`-slurm`, `ENABLE_SLURM=1`) stays or goes.
@@ -303,10 +304,10 @@ whether direct mode (`-slurm`, `ENABLE_SLURM=1`) stays or goes.
 
 Must fail or be refused:
 - [x] `ls /run/munge`, `munge -n` → not there
-- [ ] `sbatch --wrap 'touch ~/pwned'` → no `~/pwned` on the host
+- [x] `sbatch --wrap 'touch ~/pwned'` → no `~/pwned` on the host
 - [x] `sbatch --wrap 'cat ~/.ssh/id_*; ls ~/.claude'` → nothing readable
-- [ ] `sbatch -o ~/.bashrc --wrap 'echo x'` → `~/.bashrc` untouched
-- [ ] `ln -s ~/.bashrc out.log; sbatch -o out.log --wrap 'echo x'` → untouched
+- [x] `sbatch -o ~/.bashrc --wrap 'echo x'` → `~/.bashrc` untouched
+- [x] `ln -s ~/.bashrc out.log; sbatch -o out.log --wrap 'echo x'` → untouched
 - [x] `-J ../../x -o %x.out` → refused (`/` in the job name)
 - [x] `--export=ALL`, `--get-user-env`, `--container=...`, `--uid=0`, `--part=x` (abbreviation) → refused
 - [x] the same options as `#SBATCH` lines in the script → refused
@@ -319,7 +320,8 @@ Must fail or be refused:
 - [x] array `1-1000` without `%` → throttle added; budget exhausted → refused
 - [x] job on a node without bwrap → FAILED, exit 97, payload not executed
   (phase 1, simulated with a missing bwrap path: every node has bwrap)
-- [ ] editing `lib/slurmproxy.py` from the sandbox doesn't change jobs of the running session
+- [x] editing `lib/slurmproxy.py` from the sandbox doesn't change jobs of the running session
+  (marker lines added to the launcher template and `slurm-inner.sh` under a running broker: not in the job)
 
 Must work:
 - [x] plain job, array with `%N`, dependency chain, `-W`, `--test-only`
