@@ -48,4 +48,11 @@ else exec 2>"$err"
 fi || exit 98
 exec <"$in" || exit 98
 
-exec /bin/bash /run/sbox-job/script "$@"
+# honour the shebang like sbatch does (the data-bound file isn't executable);
+# as in Linux, everything after the interpreter is one argument
+IFS= read -r first < /run/sbox-job/script
+first=${first#\#!}; first=${first%$'\r'}
+first=${first#"${first%%[![:space:]]*}"}
+interp=${first%%[[:space:]]*}
+arg=${first#"$interp"}; arg=${arg#"${arg%%[![:space:]]*}"}; arg=${arg%"${arg##*[![:space:]]}"}
+exec "${interp:-/bin/bash}" ${arg:+"$arg"} /run/sbox-job/script "$@"
