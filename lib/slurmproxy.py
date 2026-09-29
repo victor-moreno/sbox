@@ -18,7 +18,6 @@ Stays python 3.6 compatible: the shim may run on the system python3.
 """
 import argparse
 import base64
-import contextlib
 import fcntl
 import json
 import os
@@ -237,14 +236,12 @@ class Ledger:
     def __init__(self, path):
         self.path = path
 
-    @contextlib.contextmanager
-    def locked(self):
+    def lock(self):
+        # held through squeue -> budget -> sbatch -> ledger write, across all
+        # sbox sessions of the user (flock is per open file, so also per thread)
         fd = os.open(self.path + ".lock", os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
-        finally:
-            os.close(fd)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
 
     def load(self):
         try:
@@ -258,12 +255,6 @@ class Ledger:
         with open(tmp, "w") as f:
             json.dump(entries, f)
         os.replace(tmp, self.path)
-
-    def add(self, jobid, project, weight):
-        with self.locked():
-            e = self.load()
-            e.append({"id": jobid, "project": project, "weight": weight, "time": int(time.time())})
-            self.save(e)
 
     def owns(self, jobid, project):
         return any(e["id"] == jobid and e["project"] == project for e in self.load())
@@ -366,8 +357,8 @@ def plan_sbatch(cfg, argv, script, cwd):
                 raise Refused("'/' is not allowed in the job name")
             name = v
         elif cls == "array":
-            count, thr = array_count(v)
-            info["array"], info["weight"] = v, count if thr is None else min(count, thr)
+            info["array"] = v
+            info["count"], info["throttle"] = array_count(v)
             sb.append("--array=" + v)
         elif cls == "wait":
             sb.append("--wait")
@@ -399,6 +390,37 @@ def plan_sbatch(cfg, argv, script, cwd):
     return sb, launcher, info
 
 
+def apply_budget(cfg, sb, info):
+    """Call with the ledger lock held. Prunes the ledger to jobs still in
+    squeue and fits this submission into cfg.max_running (jobs + array tasks,
+    pending ones included): arrays get a %N throttle added or clamped, and a
+    full budget refuses. Returns (pruned entries, message for the caller)."""
+    rc, out, err = run(cfg, [cfg.bin["squeue"], "--me", "-h", "-r", "-o", "%F"], timeout=60)
+    if rc != 0:
+        raise Refused("can't check the job budget, squeue failed: %s" % err.strip())
+    live = {}
+    for jid in out.split():        # one line per task: count per base job id
+        live[jid] = live.get(jid, 0) + 1
+    entries = [e for e in cfg.ledger.load() if e["id"] in live]
+    used = sum(min(live[e["id"]], e.get("throttle") or live[e["id"]]) for e in entries)
+    left = cfg.max_running - used
+    if left <= 0:
+        raise Refused("job budget full (%d/%d running or pending via sbox): wait or scancel"
+                      % (used, cfg.max_running))
+    msg = ""
+    if info["array"]:
+        count, thr = info["count"], info["throttle"]
+        new = min(count if thr is None else thr, left)
+        if new != thr:
+            sb[sb.index("--array=" + info["array"])] = "--array=%s%%%d" % (info["array"].partition("%")[0], new)
+            if new < count:
+                msg = ("sbox: array limited to %d tasks at a time (budget %d/%d in use)\n"
+                       % (new, used, cfg.max_running))
+        info["throttle"] = new
+        info["weight"] = min(count, new)
+    return entries, msg
+
+
 def do_sbatch(cfg, req, conn):
     argv = req["argv"]
     try:
@@ -416,26 +438,45 @@ def do_sbatch(cfg, req, conn):
         sb, launcher, info = plan_sbatch(cfg, argv, script, req["cwd"])
     except Refused as e:
         return refuse(e)
-    fd, path = tempfile.mkstemp(prefix="launch-", dir=cfg.statedir)
-    with os.fdopen(fd, "w") as f:
-        f.write(launcher)
-    jobid = []
+    lock, jobid = [], []
+
+    def release():
+        while lock:
+            os.close(lock.pop())
 
     def record(line):
-        # with --wait the id comes long before sbatch exits: record it now
+        # with --wait the id comes long before sbatch exits: record it now,
+        # and unlock, so a waiting job doesn't hold up other submissions
         jid = line.decode().strip().split(";")[0]
-        if jid.isdigit() and not info["test"]:
+        if jid.isdigit() and lock:
             jobid.append(jid)
-            cfg.ledger.add(jid, cfg.project, info["weight"])
+            entries.append({"id": jid, "project": cfg.project, "weight": info["weight"],
+                            "throttle": info.get("throttle"), "time": int(time.time())})
+            cfg.ledger.save(entries)
+        release()
 
+    entries, msg, path = [], "", None
+    # one try for everything after taking the lock: a leaked lock fd would
+    # block every later submission of the user
     try:
+        if not info["test"]:       # --test-only creates no job
+            lock.append(cfg.ledger.lock())
+            try:
+                entries, msg = apply_budget(cfg, sb, info)
+            except Refused as e:
+                return refuse(e)
+        fd, path = tempfile.mkstemp(prefix="launch-", dir=cfg.statedir)
+        with os.fdopen(fd, "w") as f:
+            f.write(launcher)
         rc, out, err = run(cfg, [cfg.bin["sbatch"]] + sb + [path], conn,
                            timeout=None if info["wait"] else 300, on_first_line=record)
     finally:
-        os.unlink(path)
+        release()
+        if path:
+            os.unlink(path)
     if jobid and not info["parsable"]:
         out = "" if info["quiet"] else "Submitted batch job %s\n" % jobid[0]
-    return reply(rc, out, err)
+    return reply(rc, out, msg + err)
 
 
 # ── scancel / scontrol ───────────────────────────────────────────────────────
@@ -611,6 +652,8 @@ def main():
     s.add_argument("--gpu", action="store_true")
     s.add_argument("--exclude", default="")
     s.add_argument("--constraint", default="")
+    s.add_argument("--max-running", type=int, default=20,
+                   help="SLURM_MAX_RUNNING: sbox jobs + array tasks, all sessions of the user")
     s.add_argument("--watch-pid", type=int)
     s.add_argument("--cleanup")
     a = p.parse_args()

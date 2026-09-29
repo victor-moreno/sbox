@@ -283,7 +283,12 @@ Phase 3: `linux.sh` integration behind `ENABLE_SLURM=broker` / `-sl` — done 20
   launchers stay in `$SLURMDIR`, out of the sandbox's reach. End to end in a nested
   sandbox: no munge, shim, ledger RO, jobs 206370/206371 ok, broker exits and cleans up)
 
-Phase 4: budget + ledger (locking, pruning, clamping, refusal)
+Phase 4: budget + ledger (locking, pruning, clamping, refusal) — done 2026-09-29
+(`apply_budget` in `lib/slurmproxy.py`; `SLURM_MAX_RUNNING` passed as `--max-running`.
+Ledger entries also keep the array `throttle`. Lock released as soon as the job ID is
+recorded, so `sbatch -W` doesn't block other submissions; any error path releases it.
+9 unit tests; real jobs with limit 3/4: array `1-10` → `ArrayTaskThrottle=2`, full budget
+refused, 3 parallel submissions for 1 free slot → exactly 1 accepted)
 
 Phase 5: acceptance, from a session the user starts with `claude -sl`, in a
 **separate scratch project** (not this repo, which the sandbox can edit)

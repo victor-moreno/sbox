@@ -522,6 +522,7 @@ if [ "${ENABLE_SLURM:-1}" = "broker" ]; then
     --inner "$SBOX_ROOT/lib/slurm-inner.sh" --project "$SANDBOX_DIR" --logdir "$_logdir"
     --statedir "$SLURMDIR/launch" --ledger "$_state/slurm/ledger.json"
     --exclude "${SLURM_EXCLUDE:-}" --constraint "${SLURM_CONSTRAINT:-}"
+    --max-running "${SLURM_MAX_RUNNING:-20}"
     --watch-pid $$ --cleanup "$SLURMDIR")
   _bw="$(command -v bwrap)" && _sl_args+=(--bwrap "$_bw")
   [ "${ENABLE_GPU:-1}" = "1" ] && _sl_args+=(--gpu)

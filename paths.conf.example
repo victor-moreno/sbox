@@ -65,6 +65,10 @@ CODER_PROJECT_ISOLATION="claude"
 #           socket, so jobs run unsandboxed and the network filter is advisory
 #   0       blocked: sbatch is still on PATH but has no config/auth
 ENABLE_SLURM=0
+# broker mode: max sbox jobs + array tasks running or pending at once, across
+# all sbox sessions of the user; arrays get a %N throttle to fit, and sbatch
+# is refused when it's used up
+SLURM_MAX_RUNNING=20
 # broker mode: nodes without a usable bwrap (Slurm hostlist, added as
 # --exclude), or a node feature marking the good ones (ANDed with the job's -C)
 SLURM_EXCLUDE=""
