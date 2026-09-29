@@ -109,7 +109,11 @@ fi
 # same binds as interactive: /dev/nvidia*, /dev/shm tmpfs, /sys/module RO (NVML needs it)
 dev=(); for d in /dev/nvidia*; do [ -e "$d" ] && dev+=(--dev-bind "$d" "$d"); done
 [ ${#dev[@]} -gt 0 ] && [ -d /sys/module/nvidia ] && dev+=(--tmpfs /dev/shm --dir /sys --ro-bind /sys/module /sys/module)
-jt=$(mktemp -d "${TMPDIR:-/tmp}/sbox-job-XXXXXX")      # node-local disk as /tmp, not RAM tmpfs
+# scancel/timeout SIGKILL the batch shell (no TERM first), so the EXIT trap only covers
+# normal ends: first remove this user's sbox-job-<id>.* dirs whose job cgroup
+# (/sys/fs/cgroup/freezer/slurm_<node>/uid_<uid>/job_<id>) is gone
+<sweep stale job dirs>
+jt=$(mktemp -d "${TMPDIR:-/tmp}/sbox-job-$SLURM_JOB_ID.XXXXXX"); trap 'rm -rf "$jt"' EXIT  # node disk, not RAM
 env=(<snapshot env>)                                     # + SLURM_*, CUDA_VISIBLE_DEVICES, ...
 exec 8< <(base64 -d <<<'<inner wrapper>')                # fixed, trusted
 exec 9< <(base64 -d <<<'<user script>')                  # snapshot at submit, like sbatch
@@ -117,7 +121,6 @@ exec 9< <(base64 -d <<<'<user script>')                  # snapshot at submit, l
      --ro-bind-data 8 /run/sbox-job/inner --ro-bind-data 9 /run/sbox-job/script \
      --chdir <cwd> /usr/bin/env -i "${env[@]}" \
      /bin/bash /run/sbox-job/inner <out> <err> <in> <open-mode> -- <script args>
-rc=$?; rm -rf "$jt"; exit $rc
 ```
 
 The inner wrapper (inside bwrap) expands `%j %A %a %x %u %N %%` (and
@@ -248,11 +251,16 @@ Phase 0: facts (record in `findings.md`) — done 2026-09-29
 - [x] project dir, `/share`, conda, `~/.local` visible on compute nodes at the same paths
   (yes; `/scratch` only on compute-cuda-[02-04] → `-try` binds needed)
 
-Phase 1: launcher by hand (real sbatch from the `-sl` dev session)
-- [ ] hand-written launcher + inner wrapper; simple job, array, GPU job, conda/R job
-- [ ] containment inside the job (see acceptance tests), exit codes in `sacct`, timeout and scancel kill everything
-- [ ] output patterns, open-mode, default output names; fail closed on a non-bwrap node
-- [ ] GPU job: the interactive GPU binds (`/dev/nvidia*`, `/dev/shm`, `/sys/module` RO) are enough on a compute node
+Phase 1: launcher by hand (real sbatch from the `-sl` dev session) — done 2026-09-29
+(prototype generator `.tmp/phase1/mklauncher.sh`, inner wrapper `lib/slurm-inner.sh`)
+- [x] hand-written launcher + inner wrapper; simple job, array, GPU job, conda/R job
+- [x] containment inside the job (see acceptance tests), exit codes in `sacct`, timeout and scancel kill everything
+  (no process survives; but the launcher is SIGKILLed without any TERM, so its
+  cleanup trap never runs → stale-dir sweep, see launcher outline)
+- [x] output patterns, open-mode, default output names; fail closed on a non-bwrap node
+  (fail closed simulated with a missing bwrap path: FAILED 97, payload not run, message in LOGDIR)
+- [x] GPU job: the interactive GPU binds (`/dev/nvidia*`, `/dev/shm`, `/sys/module` RO) are enough on a compute node
+  (`nvidia-smi` sees only the allocated GPU; other `/dev/nvidia*` are bound but the device cgroup denies them)
 
 Phase 2: broker + shim
 - [ ] option parser + array-spec counter (`1-10`, `1-10:2`, `1,3,5-7`, `%N`) with unit tests (no Slurm needed)
