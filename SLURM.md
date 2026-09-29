@@ -315,8 +315,9 @@ Must fail or be refused:
 - [x] `scontrol update ...`, `scontrol hold ...` → refused; `srun`, `salloc` → refused
 - [x] inside a job: `sbatch`, `squeue` → fail (no munge, no broker)
 - [x] inside a job: `curl https://example.com` → fails
-- [ ] interactive: `curl --noproxy '*' https://example.com` fails, via proxy works
-  (not tested: `NET_FILTER=0` in the user's paths.conf, so no filter to test)
+- [x] interactive: `curl --noproxy '*' https://example.com` fails, via proxy works
+  (with `NET_FILTER=1`: direct by name and IP blocked, allowed host via proxy ok, denied host
+  refused, slurm still works in the private network namespace; full run 50/50)
 - [x] array `1-1000` without `%` → throttle added; budget exhausted → refused
 - [x] job on a node without bwrap → FAILED, exit 97, payload not executed
   (phase 1, simulated with a missing bwrap path: every node has bwrap)
