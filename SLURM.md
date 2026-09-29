@@ -84,9 +84,9 @@ Commands:
 | `squeue`, `sinfo`, `sacct`, `sstat`, `sprio`, `sshare` | read-only, argv passed as-is (no shell) |
 | `srun`, `salloc`, anything else | refused: "not available in the sandbox, use sbatch" |
 
-### 2. Shims: `lib/slurm-shim.py`
+### 2. Shims (`lib/slurmproxy.py` itself)
 
-One Python file, dispatches on `basename(argv[0])`. `linux.sh` finds the real
+The broker file, dispatching on `basename(argv[0])`. `linux.sh` finds the real
 paths on the host (`command -v sbatch squeue ...`, may be `/usr/bin` or
 `/opt/slurm/bin`) and `--ro-bind`s the shim over each, so both `sbatch` and
 `/usr/bin/sbatch` hit the shim. For `sbatch` it locates the script argument
@@ -262,11 +262,15 @@ Phase 1: launcher by hand (real sbatch from the `-sl` dev session) — done 2026
 - [x] GPU job: the interactive GPU binds (`/dev/nvidia*`, `/dev/shm`, `/sys/module` RO) are enough on a compute node
   (`nvidia-smi` sees only the allocated GPU; other `/dev/nvidia*` are bound but the device cgroup denies them)
 
-Phase 2: broker + shim
-- [ ] option parser + array-spec counter (`1-10`, `1-10:2`, `1,3,5-7`, `%N`) with unit tests (no Slurm needed)
-- [ ] `#SBATCH` extraction, `--wrap`, stdin script, re-serialization
-- [ ] launcher generation, command table, minimal env for sbatch
-- [ ] functional test inside the dev session (broker running there has munge)
+Phase 2: broker + shim — done 2026-09-29 (`lib/slurmproxy.py` is both: `serve` = broker,
+invoked as sbatch/squeue/... = shim, so they share the option parser; python 3.6 compatible,
+the cluster's system python3)
+- [x] option parser + array-spec counter (`1-10`, `1-10:2`, `1,3,5-7`, `%N`) with unit tests (no Slurm needed)
+- [x] `#SBATCH` extraction, `--wrap`, stdin script, re-serialization
+- [x] launcher generation, command table, minimal env for sbatch
+  (inner wrapper honours the shebang, scripts without `#!` refused like sbatch;
+  `SLURM_SUBMIT_DIR` reset to the caller's cwd; default job name = script basename)
+- [x] functional test inside the dev session (broker running there has munge)
 
 Phase 3: `linux.sh` integration behind `ENABLE_SLURM=broker` / `-slb`
 - [ ] layout function refactor (interactive layout unchanged: compare bwrap argv before/after)
