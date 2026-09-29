@@ -292,6 +292,9 @@ refused, 3 parallel submissions for 1 free slot → exactly 1 accepted)
 
 Phase 5: acceptance, from a session the user starts with `claude -sl`, in a
 **separate scratch project** (not this repo, which the sandbox can edit)
+— run 2026-09-29 in `~/app/claude` on compute-01: 45 passed, 0 failed
+(script `.tmp/phase5/acceptance.sh`, local; `~/.bashrc` replaced by a canary file,
+`scancel` of a foreign job tested with a fake ID). Host-side canary check pending.
 
 Phase 6: README + `paths.conf.example` (flags already done in phase 3); decide
 whether direct mode (`-slurm`, `ENABLE_SLURM=1`) stays or goes.
@@ -299,29 +302,31 @@ whether direct mode (`-slurm`, `ENABLE_SLURM=1`) stays or goes.
 ## Acceptance tests (from inside a `-sl` sandbox)
 
 Must fail or be refused:
-- [ ] `ls /run/munge`, `munge -n` → not there
+- [x] `ls /run/munge`, `munge -n` → not there
 - [ ] `sbatch --wrap 'touch ~/pwned'` → no `~/pwned` on the host
-- [ ] `sbatch --wrap 'cat ~/.ssh/id_*; ls ~/.claude'` → nothing readable
+- [x] `sbatch --wrap 'cat ~/.ssh/id_*; ls ~/.claude'` → nothing readable
 - [ ] `sbatch -o ~/.bashrc --wrap 'echo x'` → `~/.bashrc` untouched
 - [ ] `ln -s ~/.bashrc out.log; sbatch -o out.log --wrap 'echo x'` → untouched
-- [ ] `-J ../../x -o %x.out` → refused (`/` in the job name)
-- [ ] `--export=ALL`, `--get-user-env`, `--container=...`, `--uid=0`, `--part=x` (abbreviation) → refused
-- [ ] the same options as `#SBATCH` lines in the script → refused
-- [ ] `scancel <job not submitted via sbox>`, `scancel -u $USER` → refused
-- [ ] `scontrol update ...`, `scontrol hold ...` → refused; `srun`, `salloc` → refused
-- [ ] inside a job: `sbatch`, `squeue` → fail (no munge, no broker)
-- [ ] inside a job: `curl https://example.com` → fails
+- [x] `-J ../../x -o %x.out` → refused (`/` in the job name)
+- [x] `--export=ALL`, `--get-user-env`, `--container=...`, `--uid=0`, `--part=x` (abbreviation) → refused
+- [x] the same options as `#SBATCH` lines in the script → refused
+- [x] `scancel <job not submitted via sbox>`, `scancel -u $USER` → refused
+- [x] `scontrol update ...`, `scontrol hold ...` → refused; `srun`, `salloc` → refused
+- [x] inside a job: `sbatch`, `squeue` → fail (no munge, no broker)
+- [x] inside a job: `curl https://example.com` → fails
 - [ ] interactive: `curl --noproxy '*' https://example.com` fails, via proxy works
-- [ ] array `1-1000` without `%` → throttle added; budget exhausted → refused
-- [ ] job on a node without bwrap → FAILED, exit 97, payload not executed
+  (not tested: `NET_FILTER=0` in the user's paths.conf, so no filter to test)
+- [x] array `1-1000` without `%` → throttle added; budget exhausted → refused
+- [x] job on a node without bwrap → FAILED, exit 97, payload not executed
+  (phase 1, simulated with a missing bwrap path: every node has bwrap)
 - [ ] editing `lib/slurmproxy.py` from the sandbox doesn't change jobs of the running session
 
 Must work:
-- [ ] plain job, array with `%N`, dependency chain, `-W`, `--test-only`
-- [ ] GPU job sees only its allocated GPU(s)
-- [ ] `squeue`, `sacct`, `sinfo`, `scontrol show job` output as usual
-- [ ] `scancel` on own sbox jobs (plain and array tasks)
-- [ ] launcher errors readable in LOGDIR from the sandbox
+- [x] plain job, array with `%N`, dependency chain, `-W`, `--test-only`
+- [x] GPU job sees only its allocated GPU(s)
+- [x] `squeue`, `sacct`, `sinfo`, `scontrol show job` output as usual
+- [x] `scancel` on own sbox jobs (plain and array tasks)
+- [x] launcher errors readable in LOGDIR from the sandbox
 
 ## Known limits
 
