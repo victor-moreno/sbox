@@ -235,12 +235,18 @@ Only launcher messages land there; the job's output goes where the user asked.
 
 ## Implementation phases
 
-Phase 0: facts (record in `findings.md`)
-- [ ] Slurm version; paths of `sbatch srun salloc squeue scancel sacct sinfo scontrol sstat sprio sshare`
-- [ ] bwrap version; `--ro-bind-data` supported? (fallback `--file`)
-- [ ] which nodes have usable bwrap (probe above) → `SLURM_EXCLUDE`; ask admins about a feature tag
-- [ ] in a job: `TMPDIR`, job_container plugin, `/dev/shm`, GPU device nodes, `MaxArraySize`, default partition
-- [ ] project dir, `/share`, conda, `~/.local` visible on compute nodes at the same paths
+Phase 0: facts (record in `findings.md`) — done 2026-09-29
+- [x] Slurm version; paths of `sbatch srun salloc squeue scancel sacct sinfo scontrol sstat sprio sshare`
+  (23.11.11, all in `/usr/bin`)
+- [x] bwrap version; `--ro-bind-data` supported? (fallback `--file`)
+  (0.4.0 unprivileged, same on all nodes; `--ro-bind-data` works)
+- [x] which nodes have usable bwrap (probe above) → `SLURM_EXCLUDE`; ask admins about a feature tag
+  (all 17 nodes ok → `SLURM_EXCLUDE=""`; no tag needed for now, re-probe when nodes are added)
+- [x] in a job: `TMPDIR`, job_container plugin, `/dev/shm`, GPU device nodes, `MaxArraySize`, default partition
+  (`TMPDIR=/tmp` node-local ext4, no job_container, `/dev/shm` tmpfs, all `/dev/nvidia*` present
+  but gated by `ConstrainDevices=yes`, `MaxArraySize=10001`, default `odap`)
+- [x] project dir, `/share`, conda, `~/.local` visible on compute nodes at the same paths
+  (yes; `/scratch` only on compute-cuda-[02-04] → `-try` binds needed)
 
 Phase 1: launcher by hand (real sbatch from the `-sl` dev session)
 - [ ] hand-written launcher + inner wrapper; simple job, array, GPU job, conda/R job
