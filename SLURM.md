@@ -105,12 +105,15 @@ if ! "$B" --unshare-pid --ro-bind / / --proc /proc /bin/true 2>/dev/null; then
   echo "sbox: bwrap unusable on $(hostname -s): job NOT run; add it to SLURM_EXCLUDE" >&2
   exit 97                               # fail closed: payload never runs unsandboxed
 fi
-dev=(); for d in /dev/nvidia* /dev/nvidia-caps; do [ -e "$d" ] && dev+=(--dev-bind "$d" "$d"); done
+# GPUs detected on the node at run time (the login node may have none), if ENABLE_GPU=1,
+# same binds as interactive: /dev/nvidia*, /dev/shm tmpfs, /sys/module RO (NVML needs it)
+dev=(); for d in /dev/nvidia*; do [ -e "$d" ] && dev+=(--dev-bind "$d" "$d"); done
+[ ${#dev[@]} -gt 0 ] && [ -d /sys/module/nvidia ] && dev+=(--tmpfs /dev/shm --dir /sys --ro-bind /sys/module /sys/module)
 jt=$(mktemp -d "${TMPDIR:-/tmp}/sbox-job-XXXXXX")      # node-local disk as /tmp, not RAM tmpfs
 env=(<snapshot env>)                                     # + SLURM_*, CUDA_VISIBLE_DEVICES, ...
 exec 8< <(base64 -d <<<'<inner wrapper>')                # fixed, trusted
 exec 9< <(base64 -d <<<'<user script>')                  # snapshot at submit, like sbatch
-"$B" <layout> --bind "$jt" /tmp --tmpfs /dev/shm "${dev[@]}" \
+"$B" <layout> --bind "$jt" /tmp "${dev[@]}" \
      --ro-bind-data 8 /run/sbox-job/inner --ro-bind-data 9 /run/sbox-job/script \
      --chdir <cwd> /usr/bin/env -i "${env[@]}" \
      /bin/bash /run/sbox-job/inner <out> <err> <in> <open-mode> -- <script args>
@@ -130,9 +133,10 @@ Job layout vs interactive layout:
 |---|---|---|
 | system RO, paths.conf RO/RW, SHARED_RW, conda, project RW | yes | same (`-try` variants for paths.conf entries, a node may lack some; project must exist) |
 | `~/.claude*`, per-project coder isolation | yes | **no** (jobs get no agent credentials) |
+| `SSH_DIR`, generated `~/.ssh/config` | if set | **no** (no network in jobs) |
 | network | netproxy via unix socket | none (`--unshare-net`, proxy unreachable from nodes) |
 | `/tmp` | tmpfs | per-job dir on node disk |
-| `/dev` | minimal + tty/pts | minimal + GPU devices + `/dev/shm` tmpfs |
+| `/dev` | minimal + `/dev/fd` links + tty/pts; GPU binds if `ENABLE_GPU=1` and the host has GPUs | same without tty/pts; GPU binds decided on the node at run time |
 | munge / broker socket | broker socket only | neither: no submission from inside a job |
 | env | ENV_BASE + proxy + coder vars | ENV_BASE without proxy/coder vars, + `SLURM_*`, `CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL`, `TMPDIR=/tmp`, `SBOX_JOB=1` |
 
@@ -144,7 +148,9 @@ Job layout vs interactive layout:
   `aicode` `-slb` sets `SBOX_SLURM=broker`. `sbox` (shell) uses paths.conf.
 - Broker mode:
   - no `/run/munge`, no `/run/slurm/conf` binds;
-  - network block takes the strict branch (`--unshare-net`), as without slurm;
+  - network block takes the strict branch (`--unshare-net`, `NET_FORWARD=1`), as
+    without slurm, so the `SSH_DIR` ssh config also gets the netproxy
+    `ProxyCommand` again (today slurm mode leaves ssh direct);
   - write `$SLURMDIR/layout` and `$SLURMDIR/env`, start the broker, wait for
     the socket (like netproxy), bind `$SLURMDIR` at `/run/sbox-slurm`;
   - bind the shim over each slurm client binary;
@@ -240,7 +246,7 @@ Phase 1: launcher by hand (real sbatch from the `-sl` dev session)
 - [ ] hand-written launcher + inner wrapper; simple job, array, GPU job, conda/R job
 - [ ] containment inside the job (see acceptance tests), exit codes in `sacct`, timeout and scancel kill everything
 - [ ] output patterns, open-mode, default output names; fail closed on a non-bwrap node
-- [ ] check whether CUDA needs `/sys` or `/proc/driver/nvidia` (then add RO binds)
+- [ ] GPU job: the interactive GPU binds (`/dev/nvidia*`, `/dev/shm`, `/sys/module` RO) are enough on a compute node
 
 Phase 2: broker + shim
 - [ ] option parser + array-spec counter (`1-10`, `1-10:2`, `1,3,5-7`, `%N`) with unit tests (no Slurm needed)
