@@ -57,7 +57,7 @@ CODER_RW_HERMES="$HOME/.hermes"
 # project, which forced a /login in every new folder (see lib/macos.sh).
 CODER_PROJECT_ISOLATION="claude"
 
-# Slurm inside the sandbox (Linux only; `aicode -sl` = broker, `-slurm` = 1).
+# Slurm inside the sandbox (Linux only; `aicode -sl` = broker, `-slurm-no-sandbox` = 1).
 #   broker  sbatch & co are shims to a broker outside the sandbox, which
 #           validates each submission and runs the job inside bwrap on the
 #           compute node (no munge in the sandbox, see SLURM.md)

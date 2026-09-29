@@ -19,8 +19,8 @@ if [[ ! "$CODER" =~ ^[a-zA-Z0-9_-]+$ ]]; then
 fi
 
 # -sl (any position): slurm through the broker for this launch (jobs run
-# sandboxed, see SLURM.md); -slurm / --slurm: direct slurm/munge access, as
-# before the broker. Both override ENABLE_SLURM in paths.conf.
+# sandboxed, see SLURM.md); -slurm-no-sandbox: direct slurm/munge access, as
+# before the broker (jobs run unsandboxed). Both override ENABLE_SLURM in paths.conf.
 # -local (any position): run claude against a model served on localhost.
 # -docker (any position, macOS): docker via a colima VM that mounts only the
 # project (see lib/macos.sh).
@@ -29,7 +29,7 @@ ARGS=()
 for _a in "$@"; do
   case "$_a" in
     -sl) export SBOX_SLURM=broker ;;
-    -slurm|--slurm) export SBOX_SLURM=1 ;;
+    -slurm-no-sandbox|--slurm-no-sandbox) export SBOX_SLURM=1 ;;
     -local|--local) export SBOX_LOCAL=1 ;;
     -docker|--docker) export SBOX_DOCKER=1 ;;
     *) ARGS+=("$_a") ;;

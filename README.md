@@ -19,8 +19,8 @@ aicode hermes        # Hermes Agent in a sandbox
 aicode <any-cmd>     # any command on PATH or in homebrew
 claude -sl -c        # slurm via the broker for this launch (Linux): jobs run
                      # sandboxed, see SLURM.md; other args go to claude
-claude -slurm        # direct slurm/munge access (unsandboxed jobs, advisory
-                     # network filter); both override ENABLE_SLURM
+claude -slurm-no-sandbox  # direct slurm/munge access (unsandboxed jobs,
+                     # advisory network filter); both override ENABLE_SLURM
 claude -local        # use a model served at localhost:8000 instead of the
                      # API; fails if nothing is serving
 claude -docker       # docker via a colima VM that mounts only this folder
@@ -188,7 +188,7 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
   localhost, unix sockets outside the project, and DNS lookups. On Linux,
   bwrap gets `--unshare-net`, and a forwarder inside the sandbox links
   `127.0.0.1:3128` to the proxy socket. With `-local`, the model server's
-  localhost port is bridged the same way (and only that port). With direct slurm (`-slurm`), Linux keeps the
+  localhost port is bridged the same way (and only that port). With `-slurm-no-sandbox`, Linux keeps the
   host network (slurmctld needs direct TCP), so only tools that honour
   `*_PROXY` are filtered.
 - Tools that ignore `*_PROXY` get no network (raw sockets, some node apps).
@@ -210,7 +210,7 @@ real config first (per-host settings there win) and then adds a global
 with `--unshare-net` the proxy is both the only route out and the only
 resolver. The target host therefore needs to be in `NET_ALLOW` /
 `net-allow.conf` like any other, and it is logged the same way
-(`git.iconcologia.net:22`). Without the filter, or with direct slurm (`-slurm`),
+(`git.iconcologia.net:22`). Without the filter, or with `-slurm-no-sandbox`,
 connections are direct and no `ProxyCommand` is added.
 
 `/etc/ssh/ssh_config` is shadowed with an empty file at the same time: bwrap
@@ -225,6 +225,33 @@ by hand:
   `/sys/module` (read-only) and a `/dev/shm` tmpfs are bound in when the host
   has NVIDIA devices, so CUDA works inside the sandbox; `CUDA_VISIBLE_DEVICES`
   is forwarded. `ENABLE_GPU=0` hides the GPUs.
+
+## Slurm (Linux)
+
+`claude -sl` (or `ENABLE_SLURM=broker` in paths.conf) gives the sandbox
+`sbatch`, `squeue`, `scancel`, ... without giving it munge: the commands are
+shims that talk to a broker running outside the sandbox (`lib/slurmproxy.py`).
+The broker checks each submission against an allowlist of sbatch options and
+submits a launcher that runs the script inside bwrap on the compute node, with
+the same paths as the interactive sandbox (project RW, paths.conf binds) but
+no agent config, no ssh and no network. Design, limits and tests: SLURM.md.
+
+- Batch jobs and arrays only, single node: no `srun`, `salloc`, MPI or
+  interactive jobs. `scancel` only for jobs sbox submitted from this project;
+  `scontrol` only `show`.
+- `SLURM_MAX_RUNNING` (default 20) caps sbox jobs + array tasks, running or
+  pending, across all sessions: arrays get a `%N` throttle to fit, and sbatch
+  is refused when it's used up.
+- Launcher messages (e.g. a node without usable bwrap: the job fails with exit
+  97 without running) go to `~/.local/state/sbox/slurm/logs/<project>-<hash>/`,
+  readable from the sandbox; the job's own `-o/-e` go where you asked.
+- `module` (Lmod) isn't defined in jobs: source `/etc/profile.d/lmod.sh` in
+  the script. conda: `source "$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"`.
+
+`claude -slurm-no-sandbox` (`ENABLE_SLURM=1`) is the old direct mode, for what
+the broker can't do (MPI, srun, interactive jobs): the sandbox gets munge, so
+it can submit anything and its jobs run unsandboxed with your full access,
+and the network filter becomes advisory. A warning is printed at every launch.
 
 ## Docker (macOS)
 

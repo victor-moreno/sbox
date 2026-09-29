@@ -11,9 +11,13 @@ SBOX_ROOT="${SBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd -P)}
 # load user-editable whitelist
 # shellcheck disable=SC1091
 . "$SBOX_ROOT/paths.conf"
-# `aicode <coder> -sl` sets SBOX_SLURM=broker, `-slurm` SBOX_SLURM=1 (direct
-# munge); either wins over paths.conf's value
+# `aicode <coder> -sl` sets SBOX_SLURM=broker, `-slurm-no-sandbox` SBOX_SLURM=1
+# (direct munge); either wins over paths.conf's value
 [ -n "${SBOX_SLURM:-}" ] && ENABLE_SLURM="$SBOX_SLURM"
+# direct mode hands the sandbox munge: say so on every launch
+if [ "${ENABLE_SLURM:-1}" = "1" ]; then
+  echo "aicode: slurm WITHOUT sandbox (-slurm-no-sandbox / ENABLE_SLURM=1): jobs run unsandboxed with your full access; use -sl for sandboxed jobs" >&2
+fi
 
 # ── helper: get newline-delimited coder paths from CODER_RW_<CODER> ──────────
 # Config uses uppercase keys (CODER_RW_CLAUDE), coder name is lowercased.
@@ -170,7 +174,7 @@ if [ "${NET_FILTER:-1}" = "1" ]; then
     --hint "Allow it outside the sandbox: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf")
   for _h in "${NET_ALLOW[@]+"${NET_ALLOW[@]}"}"; do _net_args+=(--allow="$_h"); done
   if [ "${ENABLE_SLURM:-1}" = "1" ]; then
-    echo "aicode: direct slurm (-slurm), network filter is advisory only (direct connections not blocked)" >&2
+    echo "aicode: slurm without sandbox, network filter is advisory only (direct connections not blocked)" >&2
     python3 "$SBOX_ROOT/lib/netproxy.py" "${_net_args[@]}" --port-file "$NETDIR/port" \
       </dev/null >/dev/null 2>>"$_netlog" &
     for _i in $(seq 50); do [ -s "$NETDIR/port" ] && break; sleep 0.1; done

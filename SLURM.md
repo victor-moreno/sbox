@@ -1,9 +1,10 @@
 # Slurm jobs under the sandbox (broker design)
 
-Status: design only, nothing implemented yet. Written 2026-09-29 on macOS;
-implementation and testing continue on the HPC login node (Linux, bwrap).
-While developing there, keep working notes in `task_plan.md`, `findings.md`,
-`progress.md` (plan-with-files, gitignored, local only).
+Status: implemented and accepted 2026-09-29 (phases 0-6 below): `aicode -sl` /
+`ENABLE_SLURM=broker`. Code: `lib/slurmproxy.py` (broker + shim),
+`lib/slurm-inner.sh`, broker block in `lib/linux.sh`. Designed on macOS, built and
+tested on the odap cluster (Linux, bwrap). Working notes: `task_plan.md`,
+`findings.md`, `progress.md` (plan-with-files, gitignored, local only).
 
 ## Problem
 
@@ -35,8 +36,8 @@ Rule that drives the design: **the sandbox never holds a munge credential.**
   Once it works, `-sl` switches to the broker.
 - The user launches the dev session with `-sl` (direct munge) so real jobs can
   be submitted while developing.
-- Flags (user, 2026-09-29, phase 3): `-sl` = broker, `-slurm`/`--slurm` = direct
-  munge (the former `-sl`). No separate `-slb`.
+- Flags (user, 2026-09-29, phase 3): `-sl` = broker, `-slurm-no-sandbox` = direct
+  munge (the former `-sl`; named in phase 6 to make the risk explicit). No separate `-slb`.
 
 ## Architecture
 
@@ -150,7 +151,7 @@ Job layout vs interactive layout:
 - Refactor the bwrap arg building into a function used for both layouts, so
   interactive and job layouts can't drift apart.
 - `ENABLE_SLURM` values: `0` off, `1` direct, `broker`;
-  `aicode -sl` sets `SBOX_SLURM=broker`, `-slurm` sets `1`. `sbox` (shell) uses paths.conf.
+  `aicode -sl` sets `SBOX_SLURM=broker`, `-slurm-no-sandbox` sets `1`. `sbox` (shell) uses paths.conf.
 - Broker mode:
   - no `/run/munge`, no `/run/slurm/conf` binds;
   - network block takes the strict branch (`--unshare-net`, `NET_FORWARD=1`), as
@@ -297,8 +298,9 @@ Phase 5: acceptance, from a session the user starts with `claude -sl`, in a
 `scancel` of a foreign job tested with a fake ID); host check (`hostcheck.sh verify`): canary
 unchanged, no `~/sbox-pwned`. Done.
 
-Phase 6: README + `paths.conf.example` (flags already done in phase 3); decide
-whether direct mode (`-slurm`, `ENABLE_SLURM=1`) stays or goes.
+Phase 6: README + `paths.conf.example`; direct mode — done 2026-09-29: direct mode stays
+(user) as `-slurm-no-sandbox` / `ENABLE_SLURM=1`, for MPI/srun/interactive jobs, with a
+warning at every launch; README "Slurm (Linux)" section.
 
 ## Acceptance tests (from inside a `-sl` sandbox)
 
