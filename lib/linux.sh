@@ -14,8 +14,10 @@ SBOX_ROOT="${SBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd -P)}
 # `aicode <coder> -sl` sets SBOX_SLURM=broker, `-slurm-no-sandbox` SBOX_SLURM=1
 # (direct munge); either wins over paths.conf's value
 [ -n "${SBOX_SLURM:-}" ] && ENABLE_SLURM="$SBOX_SLURM"
+# missing in paths.conf = no slurm (it used to mean direct munge access)
+ENABLE_SLURM="${ENABLE_SLURM:-0}"
 # direct mode hands the sandbox munge: say so on every launch
-if [ "${ENABLE_SLURM:-1}" = "1" ]; then
+if [ "${ENABLE_SLURM:-0}" = "1" ]; then
   echo "aicode: slurm WITHOUT sandbox (-slurm-no-sandbox / ENABLE_SLURM=1): jobs run unsandboxed with your full access; use -sl for sandboxed jobs" >&2
 fi
 
@@ -173,7 +175,7 @@ if [ "${NET_FILTER:-1}" = "1" ]; then
     --log "$_netlog" --always-file "$SBOX_ROOT/net-allow.conf"
     --hint "Allow it outside the sandbox: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf")
   for _h in "${NET_ALLOW[@]+"${NET_ALLOW[@]}"}"; do _net_args+=(--allow="$_h"); done
-  if [ "${ENABLE_SLURM:-1}" = "1" ]; then
+  if [ "${ENABLE_SLURM:-0}" = "1" ]; then
     echo "aicode: slurm without sandbox, network filter is advisory only (direct connections not blocked)" >&2
     python3 "$SBOX_ROOT/lib/netproxy.py" "${_net_args[@]}" --port-file "$NETDIR/port" \
       </dev/null >/dev/null 2>>"$_netlog" &
@@ -397,7 +399,7 @@ BWRAP_BASE+=(
 # outside the sandbox. sbatch itself is still on PATH either way (it's just
 # /usr/bin/sbatch, always ro-bound); this only blocks it from reaching a
 # working slurm/munge config, so it fails instead of submitting.
-if [ "${ENABLE_SLURM:-1}" = "1" ]; then
+if [ "${ENABLE_SLURM:-0}" = "1" ]; then
   [ -d /run/slurm/conf ] && BWRAP_BASE+=(--ro-bind /run/slurm/conf /run/slurm/conf)
   if [ -d /run/munge ]; then
     BWRAP_BASE+=(
@@ -501,7 +503,7 @@ ENV_BASE=(
 # the socket's dir is bound in; the layout/env snapshots and the temp
 # launchers stay out of reach, so they can't be swapped before sbatch reads
 # them. The network takes the strict branch above, as without slurm.
-if [ "${ENABLE_SLURM:-1}" = "broker" ]; then
+if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
   _state="$HOME/.local/state/sbox"
   # Slurm's own -o/-e (launcher messages) go here, never into the project:
   # slurmstepd opens them on the host before bwrap and follows symlinks

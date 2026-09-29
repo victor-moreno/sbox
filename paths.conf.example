@@ -63,7 +63,7 @@ CODER_PROJECT_ISOLATION="claude"
 #           compute node (no munge in the sandbox, see SLURM.md)
 #   1       direct: sbatch/squeue/etc. reach /run/slurm/conf and the munge
 #           socket, so jobs run unsandboxed and the network filter is advisory
-#   0       blocked: sbatch is still on PATH but has no config/auth
+#   0       blocked (also when unset): sbatch is on PATH but has no config/auth
 ENABLE_SLURM=0
 # broker mode: max sbox jobs + array tasks running or pending at once, across
 # all sbox sessions of the user; arrays get a %N throttle to fit, and sbatch
