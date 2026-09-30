@@ -285,6 +285,21 @@ gives the sandbox a docker daemon that only sees the project folder.
   tracked in `~/.colima/sbox/sessions`.
 - The VM keeps running after the session: `colima stop -p sbox`. Size: colima
   defaults (2 CPUs, 2 GB) unless your colima template says otherwise.
+- colima 0.10.3 can leave the VM without DNS (`docker pull`: `lookup ... on
+  [::1]:53`), [abiosoft/colima#1611](https://github.com/abiosoft/colima/issues/1611):
+  its dnsmasq setup is skipped when apt lists dnsmasq as upgradable. Fix it
+  on every start, manual or `-docker`, in `~/.colima/sbox/colima.yaml`
+  (replacing `provision: []`; also in `~/.colima/_templates/default.yaml` to
+  survive `colima delete`). It only acts when lookups fail and then points
+  the VM at `192.168.5.2`, the upstream colima's dnsmasq would use anyway:
+  ```yaml
+  provision:
+    - mode: after-boot
+      script: |
+        getent hosts registry-1.docker.io >/dev/null && exit 0
+        sudo rm -f /etc/resolv.conf
+        echo nameserver 192.168.5.2 | sudo tee /etc/resolv.conf >/dev/null
+  ```
 - `~/.docker` stays hidden (credentials): each session gets a temporary
   `DOCKER_CONFIG` linking the CLI plugins (compose, buildx, from
   `~/.docker/cli-plugins` or Homebrew), so a `docker login` inside lasts one
