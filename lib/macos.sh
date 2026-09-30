@@ -121,6 +121,12 @@ fi
 if [[ -n "${DOCKER_BUSY:-}" ]]; then
   DOCKER_BUSY_MSG="aicode: -docker off for this session: the docker VM is in use by $DOCKER_BUSY (close that session, then relaunch with -docker)"
   echo "$DOCKER_BUSY_MSG" >&2
+  # the coder's UI draws over it at once: wait for a key so it is noticed
+  # (terminal only, scripted launches go on); Ctrl-C quits before any setup
+  if [[ -t 0 && -t 2 ]]; then
+    read -rs -k1 "?aicode: press any key to continue without docker, Ctrl-C to quit "
+    echo >&2
+  fi
 elif [[ -n "${SBOX_DOCKER:-}" ]]; then
   DOCKER_SESSION="$_vm/sessions/$$"
   print -r -- "$SANDBOX_DIR" > "$DOCKER_SESSION"
