@@ -268,6 +268,12 @@ RC_FILE="$(mktemp /tmp/sbox-rc-XXXXXX)"
   cat <<'RCEOF'
 alias ll='ls -la'
 RCEOF
+  # Lmod: env -i drops what the login shell set up (module, MODULEPATH,
+  # BASH_ENV); re-run the site init. It exports the module function and
+  # BASH_ENV, so the coder's own bash subshells get `module` too.
+  if [ -f /etc/profile.d/lmod.sh ]; then
+    echo '. /etc/profile.d/lmod.sh >/dev/null 2>&1 || true'
+  fi
   if [ "$NET_FORWARD" = "1" ]; then
     # bridge the private loopback to netproxy; ( & ) keeps it out of job control
     cat <<'RCEOF'
