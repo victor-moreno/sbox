@@ -137,7 +137,8 @@ Job layout vs interactive layout:
 
 | | interactive | job |
 |---|---|---|
-| system RO, paths.conf RO/RW, SHARED_RW, conda, project RW | yes | same (`-try` variants for paths.conf entries, a node may lack some; project must exist) |
+| system RO, paths.conf RO/RW, SHARED_RW, `-ro`/`-rw`/`.paths.local.conf`, conda, project RW | yes | same, and only the paths that existed at launch (`-try` variants, a node may lack some; project must exist) |
+| `~/.local/state/sbox` (ledger, logs, path approvals) | RO | RO (even if paths.conf makes `~/.local` RW) |
 | `~/.claude*`, per-project coder isolation | yes | **no** (jobs get no agent credentials) |
 | `SSH_DIR`, generated `~/.ssh/config` | if set | **no** (no network in jobs) |
 | network | netproxy via unix socket | none (`--unshare-net`, proxy unreachable from nodes) |

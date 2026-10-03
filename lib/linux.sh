@@ -327,8 +327,10 @@ bwrap_fs() {
     --dir "$HOME"
   )
   if [ "$1" = job ]; then
-    for _p in "${RO[@]}"; do FS+=(--ro-bind-try "$_p" "$_p"); done
-    for _p in "${RW[@]}"; do FS+=(--bind-try "$_p" "$_p"); done
+    # only paths the session got (they existed at launch, as in USER_BINDS):
+    # a path created later, or present only on a node, must not reach jobs
+    for _p in "${RO[@]}"; do [ -e "$_p" ] && FS+=(--ro-bind-try "$_p" "$_p"); done
+    for _p in "${RW[@]}"; do [ -e "$_p" ] && FS+=(--bind-try "$_p" "$_p"); done
     [ "${#CONDA_BWRAP[@]}" -gt 0 ] && FS+=(--ro-bind-try "$HOME/.conda" "$HOME/.conda")
   else
     FS+=(
@@ -524,8 +526,12 @@ if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
   SLURMDIR="$(mktemp -d /tmp/sbox-slurm-XXXXXX)"
   mkdir "$SLURMDIR/sock" "$SLURMDIR/launch"
   bwrap_fs job
+  # $_state read-only as in the session below, or a job could rewrite the
+  # ledger, plant symlinks in the logs (slurmstepd opens them on the host) or
+  # approve .paths.local.conf edits when paths.conf makes ~/.local RW
   printf '%s\0' --unshare-pid --unshare-net --new-session --die-with-parent \
-    "${FS[@]}" --tmpfs /run "${PROJECT_TAIL[@]}" > "$SLURMDIR/layout"
+    "${FS[@]}" --tmpfs /run "${PROJECT_TAIL[@]}" \
+    --ro-bind-try "$_state" "$_state" > "$SLURMDIR/layout"
   # no proxy, coder or terminal vars: jobs have no network and no agent
   _job_env=(SBOX_JOB=1)
   for _e in "${ENV_BASE[@]}"; do
