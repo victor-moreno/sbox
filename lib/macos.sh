@@ -10,6 +10,9 @@ SBOX_ROOT="${SBOX_ROOT:-${0:A:h:h}}"
 
 # load user-editable whitelist (RW + RO + CODER_RW variables)
 . "$SBOX_ROOT/paths.conf"
+# per-launch extras from aicode/sbox: -ro/-rw, .paths.local.conf (lib/extra-paths.sh)
+RO+=(${(f)SBOX_RO})
+RW+=(${(f)SBOX_RW})
 
 # homebrew prefix differs by arch
 if [[ -d /opt/homebrew ]]; then
@@ -259,7 +262,8 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
     printf '(allow network-outbound (remote unix-socket (literal "%s")))\n' "$DOCKER_SOCK"
   fi
   # the allowlists must stay read-only even when the project is sbox itself
-  printf '(deny file-write* (literal "%s") (literal "%s"))\n' "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/net-allow.conf"
+  # same for .paths.local.conf approvals, or a coder could approve its own edits
+  printf '(deny file-write* (literal "%s") (literal "%s") (subpath "%s"))\n' "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/net-allow.conf" "$SBOX_APPROVED"
 } > "$POLICY"
 
 ZDOT=""

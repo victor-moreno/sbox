@@ -24,16 +24,23 @@ fi
 # -local (any position): run claude against a model served on localhost.
 # -docker (any position, macOS): docker via a colima VM that mounts only the
 # project (see lib/macos.sh).
+# -ro PATH / -rw PATH (any position, repeatable): extra read-only / read-write
+# path for this launch, on top of paths.conf (see lib/extra-paths.sh).
 # All are stripped so the coder never sees them.
 ARGS=()
-for _a in "$@"; do
-  case "$_a" in
+EXTRA=()
+while [ $# -gt 0 ]; do
+  case "$1" in
     -sl) export SBOX_SLURM=broker ;;
     -slurm-no-sandbox|--slurm-no-sandbox) export SBOX_SLURM=1 ;;
     -local|--local) export SBOX_LOCAL=1 ;;
     -docker|--docker) export SBOX_DOCKER=1 ;;
-    *) ARGS+=("$_a") ;;
+    -ro|-rw)
+      [ $# -ge 2 ] || { echo "aicode: $1 needs a path" >&2; exit 1; }
+      EXTRA+=("${1#-}" "$2"); shift ;;
+    *) ARGS+=("$1") ;;
   esac
+  shift
 done
 set -- "${ARGS[@]+"${ARGS[@]}"}"
 
@@ -54,11 +61,16 @@ fi
 
 # already inside a sandbox shell — just run the coder directly
 if [ -n "$SANDBOX_DIR" ]; then
+  [ ${#EXTRA[@]} -gt 0 ] && echo "aicode: -ro/-rw ignored, already inside a sandbox" >&2
   exec command "$CODER" "$@"
 fi
 
 SBOX_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
 export SBOX_ROOT
+
+# after the in-sandbox exec above: paths can only be granted at launch
+source "$SBOX_ROOT/lib/extra-paths.sh"
+sbox_extra_paths "${EXTRA[@]+"${EXTRA[@]}"}"
 
 case "$(uname -s)" in
   Darwin) exec "$SBOX_ROOT/lib/macos.sh" "$CODER" "$@" ;;

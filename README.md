@@ -25,6 +25,8 @@ claude -local        # use a model served at localhost:8000 instead of the
                      # API; fails if nothing is serving
 claude -docker       # docker via a colima VM that mounts only this folder
                      # (macOS, see Docker below)
+claude -ro ~/ref -rw ../data  # extra RO / RW paths for this launch only
+                     # (repeatable; also for sbox), see Per-project paths
 sbox                 # interactive sandboxed shell
 ```
 
@@ -162,6 +164,31 @@ paths.conf   define which paths the sandbox gets RO or RW
              no changes to lib/* needed for new coders
 net-allow.conf  "Always allow" answers from the network dialog (local, editable)
 ```
+
+## Per-project paths
+
+Extra RO/RW paths for one project, without editing `paths.conf`. Either per
+launch, `aicode claude -ro PATH -rw PATH` (or `sbox -ro PATH`), or in a
+`.paths.local.conf` at the project root:
+
+```
+# one per line: ro|rw PATH; ~ and paths relative to the project work
+ro ~/data/reference
+rw ../shared-results
+```
+
+The project is writable from inside, so the coder could edit this file to
+grant itself more next time. It is used only after you approve it: at launch
+`aicode`/`sbox` show it and ask y/N, and remember the answer (a hash of path
++ content in `~/.local/state/sbox/approved`, read-only in the sandbox) until
+the file changes. Without a terminal (the VS Code wrapper) an unapproved file
+is ignored with a warning. The file is parsed, never sourced.
+
+Paths can't be added to a running session: Seatbelt (macOS) fixes the policy
+when the process starts and no sandboxed process can widen it, and bubblewrap
+(Linux) builds a mount namespace that can't see host paths. Quit and relaunch
+with `-c` to keep the conversation: `claude -c -rw ../data`.
+Not visible in `-docker` containers, whose VM mounts only the project.
 
 ## Network filter
 

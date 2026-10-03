@@ -11,6 +11,9 @@ SBOX_ROOT="${SBOX_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd -P)}
 # load user-editable whitelist
 # shellcheck disable=SC1091
 . "$SBOX_ROOT/paths.conf"
+# per-launch extras from aicode/sbox: -ro/-rw, .paths.local.conf (lib/extra-paths.sh)
+while IFS= read -r _p; do [ -n "$_p" ] && RO+=("$_p"); done <<< "${SBOX_RO:-}"
+while IFS= read -r _p; do [ -n "$_p" ] && RW+=("$_p"); done <<< "${SBOX_RW:-}"
 # `aicode <coder> -sl` sets SBOX_SLURM=broker, `-slurm-no-sandbox` SBOX_SLURM=1
 # (direct munge); either wins over paths.conf's value
 [ -n "${SBOX_SLURM:-}" ] && ENABLE_SLURM="$SBOX_SLURM"
@@ -431,6 +434,8 @@ PROJECT_TAIL=(
   # the allowlists stay read-only even when the project is sbox itself
   --ro-bind-try "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/paths.conf"
   --ro-bind-try "$SBOX_ROOT/net-allow.conf" "$SBOX_ROOT/net-allow.conf"
+  # same for .paths.local.conf approvals, or a coder could approve its own edits
+  --ro-bind-try "$SBOX_APPROVED" "$SBOX_APPROVED"
 )
 BWRAP_BASE+=(
   "${PROJECT_TAIL[@]}"

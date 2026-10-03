@@ -11,6 +11,22 @@ fi
 SBOX_ROOT="$(cd "$(dirname -- "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
 export SBOX_ROOT
 
+# -ro PATH / -rw PATH (repeatable) and .paths.local.conf, as in aicode
+ARGS=()
+EXTRA=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -ro|-rw)
+      [ $# -ge 2 ] || { echo "sbox: $1 needs a path" >&2; exit 1; }
+      EXTRA+=("${1#-}" "$2"); shift ;;
+    *) ARGS+=("$1") ;;
+  esac
+  shift
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+source "$SBOX_ROOT/lib/extra-paths.sh"
+sbox_extra_paths "${EXTRA[@]+"${EXTRA[@]}"}"
+
 case "$(uname -s)" in
   Darwin) exec "$SBOX_ROOT/lib/macos.sh" shell "$@" ;;
   Linux)  exec "$SBOX_ROOT/lib/linux.sh" shell "$@" ;;
