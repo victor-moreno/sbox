@@ -66,6 +66,11 @@ sbox_extra_paths() {
       fi
     fi
     while read -r mode path; do
+      # parsed, not sourced: drop one pair of surrounding quotes a user may
+      # add out of shell habit, or '/abs' would be taken as relative
+      if [[ "$path" == \'*\' || "$path" == \"*\" ]]; then
+        path="${path:1:${#path}-2}"
+      fi
       case "$mode" in
         ''|'#'*) ;;
         ro|rw) _sbox_add_path "$mode" "$path" ;;

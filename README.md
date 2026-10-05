@@ -173,6 +173,7 @@ launch, `aicode claude -ro PATH -rw PATH` (or `sbox -ro PATH`), or in a
 
 ```
 # one per line: ro|rw PATH; ~ and paths relative to the project work
+# spaces need no quotes; one pair of surrounding '' or "" is stripped
 ro ~/data/reference
 rw ../shared-results
 ```
