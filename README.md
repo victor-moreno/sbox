@@ -253,6 +253,11 @@ by hand:
   `/sys/module` (read-only) and a `/dev/shm` tmpfs are bound in when the host
   has NVIDIA devices, so CUDA works inside the sandbox; `CUDA_VISIBLE_DEVICES`
   is forwarded. `ENABLE_GPU=0` hides the GPUs.
+- Apptainer (Linux, unprivileged/user-namespace install): `/dev/fuse` and a
+  private `/var/tmp` are always provided; add `/var/lib/apptainer` (session
+  dir) and `/sys` to `RO` in paths.conf. Without `/dev/fuse` each run of a
+  `.sif` extracts the whole image into `/tmp`, a tmpfs (RAM) here. `--nv`
+  needs `ENABLE_GPU=1`.
 
 ## Slurm (Linux)
 

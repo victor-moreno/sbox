@@ -325,6 +325,10 @@ bwrap_fs() {
     --symlink usr/sbin /sbin
     --ro-bind /opt /opt
     --dir "$HOME"
+    # apptainer binds /var/tmp into every container (mount tmp = yes) and
+    # fails if it's missing; private like /tmp. Before the paths.conf binds,
+    # so listing /var/tmp there still wins.
+    --tmpfs /var/tmp
   )
   if [ "$1" = job ]; then
     # only paths the session got (they existed at launch, as in USER_BINDS):
@@ -358,7 +362,10 @@ bwrap_fs() {
   )
   # batch jobs have no terminal
   [ "$1" != job ] && [ -d /dev/pts ] && FS+=(--bind /dev/pts /dev/pts)
-  for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty; do
+  # /dev/fuse: apptainer mounts .sif images with squashfuse_ll; without it
+  # every run extracts the whole image to /tmp (a tmpfs here, i.e. RAM).
+  # FUSE mounts stay inside the sandbox's own user/mount namespace.
+  for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty /dev/fuse; do
     [ "$1" = job ] && [ "$_d" = /dev/tty ] && continue
     # --dev-bind (not --bind) required for char devices: --bind sets MS_NODEV
     # which blocks device file access on older kernels (e.g. 4.18).

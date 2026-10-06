@@ -42,6 +42,8 @@ RO=(
   "$HOME/.gitignore_global"
   "$HOME/.Rprofile"
   "/share"                    # Linux cluster software (skipped elsewhere)
+  "/var/lib/apptainer"        # apptainer session dir (see README)
+  "/sys"                      # apptainer mounts sys into containers
 )
 
 # Coder-specific RW paths, keyed by CODER_RW_<codername> variables.
