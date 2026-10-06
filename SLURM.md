@@ -346,7 +346,7 @@ Must work:
   `slurm-inner.sh` bridges `127.0.0.1:3128` to its socket, as in the session.
   Allowlist = `NET_ALLOW` at session start + `net-allow.conf` (live); hosts
   allowed "for this session" in a dialog don't carry over. Verdicts go to
-  `~/.local/state/sbox/net.log` tagged `(slurm job)`. The nodes themselves
+  the project's `.tmp/sbox-net.log` tagged `(slurm job)`. The nodes themselves
   must reach the internet.
 - `$HOME` inside a job is a tmpfs plus the paths.conf binds, like the
   interactive sandbox: writes elsewhere in `$HOME` vanish.

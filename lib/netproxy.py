@@ -31,6 +31,7 @@ import shlex
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -64,12 +65,40 @@ def read_patterns(path):
     return [l for l in lines if l]
 
 
+def open_in(root, rel):
+    """Append fd for root/rel, which the sandbox can write: no component may
+    be a symlink, and the file must be a plain single-link file, or this
+    process (outside the sandbox) could be steered into writing elsewhere."""
+    *dirs, name = rel.split("/")
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for d in dirs:
+            try:
+                os.mkdir(d, 0o755, dir_fd=fd)
+            except FileExistsError:
+                pass
+            nfd = os.open(d, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = nfd
+        # O_NONBLOCK: a FIFO planted there fails instead of blocking the proxy
+        lfd = os.open(name, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                      0o644, dir_fd=fd)
+    finally:
+        os.close(fd)
+    st = os.fstat(lfd)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        os.close(lfd)
+        raise OSError("not a plain file: %s/%s" % (root, rel))
+    return lfd
+
+
 class Policy:
-    def __init__(self, static, always_file, project, log_file):
+    def __init__(self, static, always_file, project, log_file, log_root=None):
         self.static = [p.strip().lower() for p in static if p.strip()]
         self.always_file = always_file
         self.project = project
         self.log_file = log_file
+        self.log_root = log_root
         self.always, self.mtime = [], None
         # per-session answers, so one dialog covers every request to a host
         self.session = {}
@@ -80,7 +109,11 @@ class Policy:
     def log(self, verdict, host, port):
         line = "%s %s %s:%s %s\n" % (time.strftime("%F %T"), verdict, host, port, self.project)
         try:
-            with open(self.log_file, "a") as f:
+            if self.log_root:
+                fd = open_in(self.log_root, self.log_file)
+            else:
+                fd = os.open(self.log_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+            with os.fdopen(fd, "a") as f:
                 f.write(line)
         except OSError:
             pass
@@ -314,7 +347,7 @@ async def watch(pid, cleanup):
 
 
 async def serve(a):
-    policy = Policy(a.allow, a.always_file, a.project, a.log)
+    policy = Policy(a.allow, a.always_file, a.project, a.log, a.log_root)
     proxy = Proxy(policy, a.hint)
     if a.unix:
         server = await asyncio.start_unix_server(proxy.handle, a.unix)
@@ -419,6 +452,9 @@ def main():
     s.add_argument("--allow", action="append", default=[])
     s.add_argument("--always-file", required=True)
     s.add_argument("--log", required=True)
+    # --log is then relative to it and opened without following symlinks
+    # (the project dir, writable by the sandbox)
+    s.add_argument("--log-root")
     s.add_argument("--project", default="?")
     s.add_argument("--hint", default="")
     s.add_argument("--watch-pid", type=int)

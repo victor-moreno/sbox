@@ -307,7 +307,7 @@ if [[ "${NET_FILTER:-1}" == "1" ]]; then
   _netlog="$HOME/.local/state/sbox/net.log"
   mkdir -p "${_netlog:h}"
   python3 "$SBOX_ROOT/lib/netproxy.py" serve --port-file "$NETDIR/port" \
-    --watch-pid $$ --project "$SANDBOX_DIR" --log "$_netlog" \
+    --watch-pid $$ --project "$SANDBOX_DIR" --log-root "$SANDBOX_DIR" --log .tmp/sbox-net.log \
     --always-file "$SBOX_ROOT/net-allow.conf" \
     --hint "Allow it outside the sandbox: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf" \
     "${NET_ALLOW[@]/#/--allow=}" </dev/null >/dev/null 2>>"$_netlog" &

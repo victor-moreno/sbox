@@ -221,8 +221,10 @@ and is started by each `aicode`/`sbox` launch (`HTTP(S)_PROXY` point at it).
   `*_PROXY` are filtered.
 - Tools that ignore `*_PROXY` get no network (raw sockets, some node apps).
   `ssh` is the exception: see below.
-- Log: `~/.local/state/sbox/net.log` (one line per host and session, plus
-  every refusal).
+- Log: `<project>/.tmp/sbox-net.log` (one line per host and session, plus
+  every refusal; slurm jobs tagged `(slurm job)`), opened without following
+  symlinks since the sandbox can write there. netproxy's own errors stay in
+  `~/.local/state/sbox/net.log`.
 
 ## ssh (Linux)
 

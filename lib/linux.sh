@@ -172,10 +172,12 @@ NET_FORWARD=0
 if [ "${NET_FILTER:-1}" = "1" ]; then
   NETDIR="$(mktemp -d /tmp/sbox-net-XXXXXX)"
   _netlog="$HOME/.local/state/sbox/net.log"
+  SBOX_NETLOG=.tmp/sbox-net.log
   mkdir -p "$(dirname "$_netlog")"
   touch "$SBOX_ROOT/net-allow.conf"
+  # verdicts go to the project (SBOX_NETLOG); $_netlog keeps netproxy's own errors
   _net_args=(serve --watch-pid $$ --cleanup "$NETDIR" --project "$SANDBOX_DIR"
-    --log "$_netlog" --always-file "$SBOX_ROOT/net-allow.conf"
+    --log-root "$SANDBOX_DIR" --log "$SBOX_NETLOG" --always-file "$SBOX_ROOT/net-allow.conf"
     --hint "Allow it outside the sandbox: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf")
   for _h in "${NET_ALLOW[@]+"${NET_ALLOW[@]}"}"; do _net_args+=(--allow="$_h"); done
   if [ "${ENABLE_SLURM:-0}" = "1" ]; then
@@ -553,7 +555,7 @@ if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
   if [ "${NET_FILTER:-1}" = "1" ] && [ "${SLURM_NET:-1}" = "1" ]; then
     _job_net=1
     _job_env+=("${NET_ENV[@]}")
-    _nargs=(--always-file "$SBOX_ROOT/net-allow.conf" --log "$_state/net.log"
+    _nargs=(--always-file "$SBOX_ROOT/net-allow.conf" --log-root "$SANDBOX_DIR" --log "$SBOX_NETLOG"
       --project "$SANDBOX_DIR (slurm job)"
       --hint "Jobs can't ask: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf")
     for _h in "${NET_ALLOW[@]+"${NET_ALLOW[@]}"}"; do _nargs+=(--allow="$_h"); done
