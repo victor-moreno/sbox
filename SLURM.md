@@ -141,11 +141,11 @@ Job layout vs interactive layout:
 | `~/.local/state/sbox` (ledger, logs, path approvals) | RO | RO (even if paths.conf makes `~/.local` RW) |
 | `~/.claude*`, per-project coder isolation | yes | **no** (jobs get no agent credentials) |
 | `SSH_DIR`, generated `~/.ssh/config` | if set | **no** (no network in jobs) |
-| network | netproxy via unix socket | none (`--unshare-net`, proxy unreachable from nodes) |
+| network | netproxy via unix socket | with `SLURM_NET=1` (default) and `NET_FILTER=1`: own netproxy on the node, same allowlist, no dialog (unknown hosts denied); else none. `--unshare-net` either way |
 | `/tmp` | tmpfs | per-job dir on node disk |
 | `/dev` | minimal + `/dev/fd` links + tty/pts; GPU binds if `ENABLE_GPU=1` and the host has GPUs | same without tty/pts; GPU binds decided on the node at run time |
 | munge / broker socket | broker socket only | neither: no submission from inside a job |
-| env | ENV_BASE + proxy + coder vars | ENV_BASE without proxy/coder vars, + `SLURM_*`, `CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL`, `TMPDIR=/tmp`, `SBOX_JOB=1` |
+| env | ENV_BASE + proxy + coder vars | ENV_BASE without coder vars (proxy vars only with job network), + `SLURM_*`, `CUDA_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL`, `TMPDIR=/tmp`, `SBOX_JOB=1` |
 
 ### 4. `lib/linux.sh` changes
 
@@ -340,7 +340,14 @@ Must work:
 - No MPI / multi-node, no interactive jobs, no job steps (`srun` inside a job).
 - Signals to the batch script: only USR1, USR2, HUP, TERM reach the user script
   (the launcher runs bwrap in the background, where bash ignores INT/QUIT).
-- Jobs have no network.
+- Job network (`SLURM_NET=1`): the launcher starts `netproxy.py serve` on the
+  node, outside bwrap, from the broker's snapshot of its source and with the
+  broker's python (the node's `/usr/bin/python3` is 3.6, netproxy needs 3.7);
+  `slurm-inner.sh` bridges `127.0.0.1:3128` to its socket, as in the session.
+  Allowlist = `NET_ALLOW` at session start + `net-allow.conf` (live); hosts
+  allowed "for this session" in a dialog don't carry over. Verdicts go to
+  `~/.local/state/sbox/net.log` tagged `(slurm job)`. The nodes themselves
+  must reach the internet.
 - `$HOME` inside a job is a tmpfs plus the paths.conf binds, like the
   interactive sandbox: writes elsewhere in `$HOME` vanish.
 - `module` (Lmod) isn't defined under `env -i`; scripts source

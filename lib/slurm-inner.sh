@@ -48,6 +48,13 @@ else exec 2>"$err"
 fi || exit 98
 exec <"$in" || exit 98
 
+# SLURM_NET: bridge the job's private loopback to the netproxy the launcher
+# started on the node (HTTP(S)_PROXY points here); ( & ) keeps it out of the script's jobs
+if [ -S /run/sbox-net/proxy.sock ]; then
+  ( "${SBOX_PYTHON:-python3}" /run/sbox-netproxy.py forward --listen 3128 --unix /run/sbox-net/proxy.sock >/dev/null 2>&1 & )
+  for _i in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/3128) 2>/dev/null && break; sleep 0.1; done
+fi
+
 # honour the shebang like sbatch does (the data-bound file isn't executable);
 # as in Linux, everything after the interpreter is one argument
 IFS= read -r first < /run/sbox-job/script

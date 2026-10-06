@@ -539,7 +539,7 @@ if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
   printf '%s\0' --unshare-pid --unshare-net --new-session --die-with-parent \
     "${FS[@]}" --tmpfs /run "${PROJECT_TAIL[@]}" \
     --ro-bind-try "$_state" "$_state" > "$SLURMDIR/layout"
-  # no proxy, coder or terminal vars: jobs have no network and no agent
+  # no coder or terminal vars: jobs have no agent; proxy vars only with SLURM_NET below
   _job_env=(SBOX_JOB=1)
   for _e in "${ENV_BASE[@]}"; do
     case "${_e%%=*}" in
@@ -547,6 +547,18 @@ if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
         _job_env+=("$_e") ;;
     esac
   done
+  # SLURM_NET (default on, needs NET_FILTER=1): jobs get their own netproxy on
+  # the node with this session's allowlist, minus the dialog (SLURM.md)
+  _job_net=0
+  if [ "${NET_FILTER:-1}" = "1" ] && [ "${SLURM_NET:-1}" = "1" ]; then
+    _job_net=1
+    _job_env+=("${NET_ENV[@]}")
+    _nargs=(--always-file "$SBOX_ROOT/net-allow.conf" --log "$_state/net.log"
+      --project "$SANDBOX_DIR (slurm job)"
+      --hint "Jobs can't ask: add it to NET_ALLOW in $SBOX_ROOT/paths.conf or to $SBOX_ROOT/net-allow.conf")
+    for _h in "${NET_ALLOW[@]+"${NET_ALLOW[@]}"}"; do _nargs+=(--allow="$_h"); done
+    printf '%s\0' "${_nargs[@]}" > "$SLURMDIR/netargs"
+  fi
   printf '%s\0' "${_job_env[@]}" > "$SLURMDIR/env"
   _sl_args=(serve --unix "$SLURMDIR/sock/sock" --layout "$SLURMDIR/layout" --env "$SLURMDIR/env"
     --inner "$SBOX_ROOT/lib/slurm-inner.sh" --project "$SANDBOX_DIR" --logdir "$_logdir"
@@ -556,6 +568,7 @@ if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
     --watch-pid $$ --cleanup "$SLURMDIR")
   _bw="$(command -v bwrap)" && _sl_args+=(--bwrap "$_bw")
   [ "${ENABLE_GPU:-1}" = "1" ] && _sl_args+=(--gpu)
+  [ "$_job_net" = 1 ] && _sl_args+=(--netproxy "$SBOX_ROOT/lib/netproxy.py" --net-args "$SLURMDIR/netargs")
   python3 "$SBOX_ROOT/lib/slurmproxy.py" "${_sl_args[@]}" \
     </dev/null >/dev/null 2>>"$_state/slurm/broker.log" &
   for _i in $(seq 50); do [ -S "$SLURMDIR/sock/sock" ] && break; sleep 0.1; done

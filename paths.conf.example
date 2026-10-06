@@ -75,6 +75,10 @@ SLURM_MAX_RUNNING=20
 # --exclude), or a node feature marking the good ones (ANDed with the job's -C)
 SLURM_EXCLUDE=""
 SLURM_CONSTRAINT=""
+# broker mode, with NET_FILTER=1: 1 (default) gives jobs network through a
+# netproxy on the node with the same allowlist (no dialog there: unknown
+# hosts are denied, add them to NET_ALLOW or net-allow.conf); 0 = no network
+SLURM_NET=1
 
 # GPU access inside the sandbox (Linux only). When 1, the host's /dev/nvidia*
 # devices, a read-only /sys/module and a /dev/shm tmpfs are bound in, so CUDA

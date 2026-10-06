@@ -201,21 +201,23 @@ if [ -n "$cg" ] && [ -d "/sys/fs/cgroup/freezer$cg" ]; then
   done
 fi
 jt=$(mktemp -d "${TMPDIR:-/tmp}/sbox-job-$SLURM_JOB_ID.XXXXXX") || exit 96
-trap 'rm -rf "$jt" "$jt.info"' EXIT
+np=
+trap '[ -n "$np" ] && kill "$np" 2>/dev/null && wait "$np"; rm -rf "$jt" "$jt.info" "$jt.net"' EXIT
 env=(%(env)s)
 while IFS= read -r -d '' kv; do
   case $kv in SLURM_*|SLURMD_NODENAME=*|CUDA_VISIBLE_DEVICES=*|ROCR_VISIBLE_DEVICES=*|GPU_DEVICE_ORDINAL=*) env+=("$kv") ;; esac
 done < <(env -0)
 # Slurm's submit dir is the broker's log dir; scripts expect the caller's cwd
 env+=(%(submit_dir)s)
-exec 8< <(base64 -d <<<'%(inner)s')
+net=()
+%(net)sexec 8< <(base64 -d <<<'%(inner)s')
 exec 9< <(base64 -d <<<'%(script)s')
 # In the background so signals for the batch shell (--signal=B:..., scancel -b -s)
 # can be passed on: bwrap doesn't forward them, and its pid-1 helper ignores
 # them, so they go to the helper's children, i.e. the user script (B: = only
 # the batch script, as without sbox). INT/QUIT can't be: bash ignores them in
 # background commands, and a script can't trap what was ignored at its start.
-"$B" --info-fd 7 %(layout)s --bind "$jt" /tmp "${dev[@]}" \
+"$B" --info-fd 7 %(layout)s --bind "$jt" /tmp "${dev[@]}" "${net[@]}" \
   --dir /run/sbox-job --ro-bind-data 8 /run/sbox-job/inner --ro-bind-data 9 /run/sbox-job/script \
   --chdir %(chdir)s /usr/bin/env -i "${env[@]}" \
   /bin/bash /run/sbox-job/inner %(inner_args)s 7>"$jt.info" &
@@ -234,6 +236,26 @@ done
 exit $rc
 '''
 
+# SLURM_NET: a netproxy on the node, outside bwrap, with the session's
+# allowlist (no dialog on a node: unknown hosts are denied). Its source is the
+# broker's snapshot, so edits made from a sandbox never run outside one. The
+# job keeps --unshare-net and reaches it only through the socket. Both ends
+# run on the broker's python (netproxy needs >= 3.7; the node's may be older).
+LAUNCHER_NET = r'''mkdir -p "$jt.net/sock" || exit 96
+base64 -d <<<'%(netproxy)s' > "$jt.net/netproxy.py"
+%(python)s "$jt.net/netproxy.py" serve --unix "$jt.net/sock/proxy.sock" --watch-pid $$ %(net_args)s \
+  </dev/null >/dev/null 2>>"$jt.net/err" &
+np=$!
+for i in $(seq 50); do [ -S "$jt.net/sock/proxy.sock" ] && break; sleep 0.1; done
+if [ -S "$jt.net/sock/proxy.sock" ]; then
+  net=(--bind "$jt.net/sock" /run/sbox-net --ro-bind "$jt.net/netproxy.py" /run/sbox-netproxy.py)
+  env+=(SBOX_PYTHON=%(python)s)
+else
+  echo "sbox: netproxy did not start on $(hostname -s), job runs without network:" >&2
+  cat "$jt.net/err" >&2
+fi
+'''
+
 
 def q(args):
     return " ".join(shlex.quote(a) for a in args)
@@ -247,6 +269,9 @@ def make_launcher(cfg, script, submit_dir, chdir, out, err, inp, mode, sargs):
                 "env": q(cfg.env), "submit_dir": q(["SLURM_SUBMIT_DIR=" + submit_dir]),
                 "inner": b64(cfg.inner), "script": b64(script),
                 "layout": q(cfg.layout), "chdir": shlex.quote(chdir),
+                "net": LAUNCHER_NET % {"netproxy": b64(cfg.netproxy), "net_args": q(cfg.net_args),
+                                       "python": shlex.quote(sys.executable)}
+                       if cfg.netproxy else "",
                 "inner_args": q([out, err, inp, mode, "--"] + sargs)})
 
 
@@ -607,6 +632,11 @@ def serve(a):
     cfg.env = read_nul(a.env)
     with open(a.inner, "rb") as f:
         cfg.inner = f.read()
+    cfg.netproxy = None
+    if a.netproxy:
+        with open(a.netproxy, "rb") as f:
+            cfg.netproxy = f.read()
+        cfg.net_args = read_nul(a.net_args)
     cfg.bwrap = a.bwrap or shutil.which("bwrap") or "/usr/bin/bwrap"
     cfg.bin = dict((c, shutil.which(c) or "/usr/bin/" + c) for c in SHIM_CMDS)
     cfg.run_env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
@@ -675,6 +705,8 @@ def main():
     s.add_argument("--ledger", required=True)
     s.add_argument("--bwrap")
     s.add_argument("--gpu", action="store_true")
+    s.add_argument("--netproxy", help="netproxy.py: give jobs filtered network (SLURM_NET)")
+    s.add_argument("--net-args", help="NUL-separated args for netproxy serve (allowlist, log)")
     s.add_argument("--exclude", default="")
     s.add_argument("--constraint", default="")
     s.add_argument("--max-running", type=int, default=20,
