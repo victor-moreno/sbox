@@ -666,13 +666,12 @@ def serve(a):
     cfg.env = read_nul(a.env)
     with open(a.inner, "rb") as f:
         cfg.inner = f.read()
-    cfg.netproxy = cfg.net_args = None
+    # cfg is a: replace each path with its content, never reset before reading
     if a.netproxy:
         with open(a.netproxy, "rb") as f:
             cfg.netproxy = f.read()
     # job network only with --net-args (SLURM_NET); netproxy alone serves --publish
-    if a.net_args:
-        cfg.net_args = read_nul(a.net_args)
+    cfg.net_args = read_nul(a.net_args) if a.net_args else None
     cfg.publish = None
     if a.publish_ports:
         lo, _, hi = a.publish_ports.partition("-")

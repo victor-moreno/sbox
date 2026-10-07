@@ -306,8 +306,8 @@ no agent config, no ssh and no network. Design, limits and tests: SLURM.md.
   job runs on its `127.0.0.1:PORT` reachable at `<node>:PORT` from the
   cluster, e.g. a vLLM server for other jobs or the sandbox (allow the node
   in `NET_ALLOW`/`net-allow.conf`; clients go through `HTTP_PROXY`). Anyone
-  who can reach the node can connect: the server must require a key, passed
-  in its env or a file (command lines are visible to other users), see GUIDE.md.
+  who can reach the node can connect; an API key is optional (pass it in the
+  server's env or a file, not on the command line), see GUIDE.md.
 - `module` (Lmod) isn't defined in jobs: source `/etc/profile.d/lmod.sh` in
   the script. conda: `source "$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"`.
 
