@@ -598,6 +598,39 @@ if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
   done
 fi
 
+# ── agent guide + this session's settings (GUIDE.md) ─────────────────────────
+# so the agent can tell what is on and what to ask for; the sbox dir itself
+# isn't visible from other projects. The status goes in through an fd: no
+# temp file left behind by the exec below.
+_bound() { local p s=; for p in "$@"; do [ -e "$p" ] && s+=" $p"; done; printf '%s' "${s# }"; }
+_gpu=0; [ "${#GPU_BWRAP[@]}" -gt 0 ] && [ -d /sys/module/nvidia ] && _gpu=1
+_status="# sbox session settings, see \$SBOX_GUIDE
+platform=linux
+host=$(hostname -s)
+project=$SANDBOX_DIR
+coder=$CODER
+paths_conf=$SBOX_ROOT/paths.conf
+net_allow_file=$SBOX_ROOT/net-allow.conf
+net_filter=${NET_FILTER:-1}
+slurm=${ENABLE_SLURM:-0}
+slurm_net=$([ "${_job_net:-0}" = 1 ] && echo 1 || echo 0)
+slurm_max_running=${SLURM_MAX_RUNNING:-20}
+slurm_publish_ports=${SLURM_PUBLISH_PORTS:-}
+slurm_exclude=${SLURM_EXCLUDE:-}
+gpu=$_gpu
+ssh=${SSH_BWRAP:+$SSH_DIR}
+local_llm=${SBOX_LOCAL:-0}
+ro=$(_bound "${RO[@]+"${RO[@]}"}")
+rw=$(_bound "${RW[@]+"${RW[@]}"}")
+node_ro=${NODE_RO[*]+"${NODE_RO[*]}"}
+node_rw=${NODE_RW[*]+"${NODE_RW[*]}"}"
+exec 5<<<"$_status"
+BWRAP_BASE+=(
+  --ro-bind-try "$SBOX_ROOT/GUIDE.md" /run/sbox/GUIDE.md
+  --ro-bind-data 5 /run/sbox/status
+)
+ENV_BASE+=(SBOX_GUIDE=/run/sbox/GUIDE.md SBOX_STATUS=/run/sbox/status)
+
 # ── exec ─────────────────────────────────────────────────────────────────────
 if [ "$CODER" != "shell" ]; then
   # Write a wrapper script to avoid injecting CODER into bash -c string

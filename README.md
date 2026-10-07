@@ -30,6 +30,23 @@ claude -ro ~/ref -rw ../data  # extra RO / RW paths for this launch only
 sbox                 # interactive sandboxed shell
 ```
 
+## Guide for agents
+
+`GUIDE.md` tells the agent inside what the sandbox allows (paths, network,
+ssh, GPU, Slurm, docker) and what to ask you for when something is off. Every
+session gets it at `$SBOX_GUIDE` (`/run/sbox/GUIDE.md` on Linux), plus, on
+Linux, `$SBOX_STATUS` (`/run/sbox/status`): this session's actual settings
+(slurm mode, job network, publish ports, GPU, bound paths). Point agents to
+it from your global `CLAUDE.md`:
+
+```
+## Sandbox (sbox)
+If SANDBOX_DIR is set you run inside sbox. Before using Slurm, network, ssh,
+GPUs, containers or paths outside the project, or when something is blocked,
+read $SBOX_GUIDE and check $SBOX_STATUS for what this session has enabled.
+Don't work around the sandbox: ask me for what you need, as the guide says.
+```
+
 ## Two Claude accounts on one computer
 
 Each account gets its own config dir, selected with `CLAUDE_CONFIG_DIR`:

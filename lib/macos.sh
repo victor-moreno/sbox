@@ -264,7 +264,10 @@ POLICY="$(mktemp /tmp/sbox-policy-XXXXXX)"
   # the allowlists must stay read-only even when the project is sbox itself
   # same for .paths.local.conf approvals, or a coder could approve its own edits
   printf '(deny file-write* (literal "%s") (literal "%s") (subpath "%s"))\n' "$SBOX_ROOT/paths.conf" "$SBOX_ROOT/net-allow.conf" "$SBOX_APPROVED"
+  # the agent guide (GUIDE.md, $SBOX_GUIDE): sbox's dir is otherwise hidden under $HOME
+  printf '(allow file-read* (literal "%s"))\n' "$SBOX_ROOT/GUIDE.md"
 } > "$POLICY"
+export SBOX_GUIDE="$SBOX_ROOT/GUIDE.md"
 
 ZDOT=""
 cleanup() {
