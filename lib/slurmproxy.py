@@ -438,6 +438,9 @@ def plan_sbatch(cfg, argv, script, cwd):
                 raise Refused("--publish is off: set SLURM_PUBLISH_PORTS in paths.conf")
             if not (v.isdigit() and lo <= int(v) <= hi):
                 raise Refused("--publish must be one port in %d-%d (SLURM_PUBLISH_PORTS)" % (lo, hi))
+            # the node-side listener is netproxy: a broker started without it can't publish
+            if not cfg.netproxy:
+                raise Refused("--publish: this session's broker has no netproxy; relaunch the session")
             info["port"] = str(int(v))
         elif cls == "wait":
             sb.append("--wait")
