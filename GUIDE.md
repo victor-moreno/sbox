@@ -150,15 +150,34 @@ gateway, a database):
 #!/bin/bash
 #SBATCH -p odap-gpu --gres=gpu:1 -t 08:00:00
 #SBATCH --publish=8000
-vllm serve /scratch/models/X --host 127.0.0.1 --port "$SBOX_PUBLISH_PORT" --api-key "$(cat key.txt)"
+export VLLM_API_KEY=$(cat .tmp/serve.key)    # env, not --api-key: see below
+vllm serve /scratch/models/X --host 127.0.0.1 --port "$SBOX_PUBLISH_PORT"
 ```
 
 - The port must be in `slurm_publish_ports` (`$SBOX_STATUS`); empty = off,
   ask the user. One port per job; not with `--array`.
 - The server listens on `127.0.0.1:PORT` (or `0.0.0.0`) **inside** the job;
-  the node exposes it as `<node>:PORT` to the whole cluster network. **Always
-  set an API key**: other users can reach it.
-- Several processes in one job talk over the job's own localhost (any port).
+  the node exposes it as `<node>:PORT` to the whole cluster network, other
+  users included.
+- **The published server must require a key.** Don't publish a server that
+  can't authenticate clients (a bare database, a debug UI).
+  - Create the key once, unreadable by others and out of git:
+    `umask 077; python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > .tmp/serve.key`
+    (`.tmp/` gitignored). Never print it, log it, commit it or put it in chat.
+  - Pass it through the **environment** or a file, never on the command
+    line: other users on the node can read command lines with `ps`. vLLM
+    reads `VLLM_API_KEY`; for other servers, use their env var or key file
+    option.
+  - vLLM checks the key only on `/v1/...`; `/health`, `/metrics` and
+    `/version` stay open (they expose no prompts).
+  - Clients read the same file and send `Authorization: Bearer <key>`
+    (OpenAI clients: `api_key=`). Clients in other jobs can read it too:
+    the project dir is on the shared filesystem.
+- Only the published port needs the key. Several processes in one job (a
+  gateway and its backends) talk over the job's own localhost on any port,
+  which nothing outside the job can reach.
+- Traffic is plain HTTP on the cluster network: the key keeps other users
+  out, it doesn't encrypt prompts or answers.
 - Find the node: `squeue -j <id> -h -o %N`. Wait until it answers:
   `curl -s http://<node>:PORT/health` (from the session, through the proxy;
   the node must be allowed, see Network).
