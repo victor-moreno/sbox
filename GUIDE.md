@@ -1,7 +1,9 @@
-# sbox: guide for agents running inside it
+# sbox: guide for Claude Code running inside it
 
-You are running inside **sbox**, a sandbox that limits what you can read,
-write and reach on the network. This guide says what works, what doesn't,
+You are Claude Code running inside **sbox**, a sandbox that limits what you
+(and every command, hook, MCP server and subagent you start) can read,
+write and reach on the network. Other coders (`aicode hermes`, ...) get the
+same sandbox; the Claude Code section is the only part specific to it. This guide says what works, what doesn't,
 and what to ask the user when you need more. Read it before you use Slurm,
 the network, ssh, GPUs, containers or paths outside the project.
 
@@ -17,6 +19,34 @@ session. When you need something, **stop and ask the user**, giving the
 exact line to add (templates in "Asking for more" below). Don't try to work
 around the sandbox: it fails, and it costs the user's trust.
 
+## Claude Code in sbox
+
+- The user starts you with `claude` (sbox's wrapper for `aicode claude`).
+  sbox is the sandbox: Claude Code's own Bash sandbox is turned off at
+  launch (`--settings '{"sandbox":{"enabled":false}}'`), and
+  `dangerouslyDisableSandbox` gains nothing.
+- **Nothing you start outlives the session.** Background Bash tasks,
+  `nohup`, `setsid`, tmux inside: all are killed when the session exits (own
+  PID namespace, `--die-with-parent`). Long downloads, training, servers
+  that must keep running: submit them with `sbatch` (see Slurm), or ask the
+  user to run them outside.
+- Config: `~/.claude` is read-write (settings, skills, hooks, plugins,
+  memory); `~/.claude/CLAUDE.md` is **read-only**: propose edits to the user.
+- Linux: history is per project (`~/.claude/projects`, `session-env`,
+  `tasks` are bound from `<project>/.claude/`), so `claude -c`/`--resume`
+  see only this project's sessions, and memory files live there too.
+- Changes to the sandbox need a relaunch: the user quits and runs
+  `claude -c <flags>`, which resumes this conversation. Say which flags.
+- Network-using tools go through the proxy (see Network): WebFetch,
+  HTTP/SSE MCP servers, plugin and marketplace installs, hooks that call
+  out (the Telegram hook needs `api.telegram.org`). A failure with a 403 or
+  "proxy" in it means the host isn't allowed: ask, don't retry. Anthropic's
+  own endpoints (`*.anthropic.com`, `claude.ai`) are allowed.
+- stdio MCP servers, hooks, `!` commands typed by the user and subagents run
+  inside the sandbox with the same limits as your Bash tool.
+- `claude update` works (`~/.local/share/claude/versions` is writable);
+  telemetry and error reporting are off.
+
 ## Filesystem
 
 | path | access |
@@ -30,7 +60,7 @@ around the sandbox: it fails, and it costs the user's trust.
 | `$HOME` (macOS) | hidden except the listed paths |
 | `/tmp` (Linux) | private tmpfs (RAM), gone at exit. Use `<project>/.tmp/` for scratch files that must survive or are large |
 | `/var/tmp` (Linux) | private tmpfs |
-| agent config (`~/.claude` ...) | read-write for the agent; per-project history on Linux |
+| `~/.claude`, `~/.claude.json` | read-write, except `~/.claude/CLAUDE.md` (read-only); per-project history on Linux |
 
 - Missing file that the user says exists → it's probably outside the
   sandbox. Ask (see below); don't search the disk.
@@ -127,7 +157,8 @@ Check `slurm=` in `$SBOX_STATUS`:
 ### Inside a job
 
 - Same paths as the interactive sandbox (project RW, paths.conf binds,
-  `NODE_RO/NODE_RW` if the node has them), no agent config, no ssh.
+  `NODE_RO/NODE_RW` if the node has them), no ssh, and no `~/.claude`:
+  `claude -p` can't log in inside a job.
 - `$HOME` is a tmpfs; `/tmp` is a per-job dir on the node's disk.
 - Env: `PATH`, `HOME`, `USER`, `LANG`, `TMPDIR=/tmp`, `SANDBOX_DIR`, conda
   vars, `SLURM_*`, `CUDA_VISIBLE_DEVICES`, `SBOX_JOB=1`,
@@ -209,7 +240,7 @@ vllm serve /scratch/models/X --host 127.0.0.1 --port "$SBOX_PUBLISH_PORT"
 
 ## Local model (`-local`)
 
-The user can run the agent against a model served at `localhost:8000`
+The user can run Claude Code against a model served at `localhost:8000`
 (`claude -local`). Then `ANTHROPIC_BASE_URL` points there and only that port
 is bridged into the sandbox. Nothing for you to do.
 

@@ -32,7 +32,7 @@ sbox                 # interactive sandboxed shell
 
 ## Guide for agents
 
-`GUIDE.md` tells the agent inside what the sandbox allows (paths, network,
+`GUIDE.md` tells Claude Code (or another coder) inside what the sandbox allows (paths, network,
 ssh, GPU, Slurm, docker) and what to ask you for when something is off. Every
 session gets it at `$SBOX_GUIDE` (`/run/sbox/GUIDE.md` on Linux), plus, on
 Linux, `$SBOX_STATUS` (`/run/sbox/status`): this session's actual settings
