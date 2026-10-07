@@ -282,6 +282,14 @@ no agent config, no ssh and no network. Design, limits and tests: SLURM.md.
 - Launcher messages (e.g. a node without usable bwrap: the job fails with exit
   97 without running) go to `~/.local/state/sbox/slurm/logs/<project>-<hash>/`,
   readable from the sandbox; the job's own `-o/-e` go where you asked.
+- Paths only some nodes have (`/scratch` on the GPU nodes): list them in
+  `NODE_RO`/`NODE_RW`, not `RO`/`RW`, which drop paths missing where you
+  launch.
+- `sbatch --publish=PORT` (port in `SLURM_PUBLISH_PORTS`) makes a server the
+  job runs on its `127.0.0.1:PORT` reachable at `<node>:PORT` from the
+  cluster, e.g. a vLLM server for other jobs or the sandbox (allow the node
+  in `NET_ALLOW`/`net-allow.conf`; clients go through `HTTP_PROXY`). Anyone
+  who can reach the node can connect: put an API key on the server.
 - `module` (Lmod) isn't defined in jobs: source `/etc/profile.d/lmod.sh` in
   the script. conda: `source "$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"`.
 

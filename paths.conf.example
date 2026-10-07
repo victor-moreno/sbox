@@ -46,6 +46,18 @@ RO=(
   "/sys"                      # apptainer mounts sys into containers
 )
 
+# Node-local paths (Linux): bound wherever bwrap runs and they exist, checked
+# there, not on the host you launch from. For Slurm jobs that need a path
+# only some nodes have (e.g. /scratch on the GPU nodes, missing on the login
+# node: RO/RW above would drop it). NODE_RW is bound after NODE_RO, so a
+# subdir can be writable (e.g. vLLM's compile cache).
+NODE_RO=(
+  # "/scratch"
+)
+NODE_RW=(
+  # "/scratch/models/cache"
+)
+
 # Coder-specific RW paths, keyed by CODER_RW_<codername> variables.
 # Paths are newline-delimited to support spaces in paths.
 # Nonexistent paths are skipped.
@@ -79,6 +91,12 @@ SLURM_CONSTRAINT=""
 # netproxy on the node with the same allowlist (no dialog there: unknown
 # hosts are denied, add them to NET_ALLOW or net-allow.conf); 0 = no network
 SLURM_NET=1
+# broker mode: ports a job may expose on its node, LO-HI ("" = off). A job
+# asks for one with `sbatch --publish=PORT` (or #SBATCH --publish=PORT): the
+# node listens on 0.0.0.0:PORT, open to anyone who can reach the node, and
+# forwards to the job's own 127.0.0.1:PORT. Inbound only, jobs stay
+# --unshare-net; a port already in use on the node fails the job (exit 95).
+SLURM_PUBLISH_PORTS=""
 
 # GPU access inside the sandbox (Linux only). When 1, the host's /dev/nvidia*
 # devices, a read-only /sys/module and a /dev/shm tmpfs are bound in, so CUDA

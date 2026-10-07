@@ -77,6 +77,8 @@ OPTS = {
     "help": ("h", "flag", "help"), "usage": (None, "flag", "help"),
     "version": ("V", "flag", "version"),
     "signal": (None, "arg", "signal"),
+    # sbox's own: expose one port of the job on its node (SLURM_PUBLISH_PORTS)
+    "publish": (None, "arg", "publish"),
 }
 SHORT = dict((v[0], k) for k, v in OPTS.items() if v[0])
 
@@ -201,23 +203,23 @@ if [ -n "$cg" ] && [ -d "/sys/fs/cgroup/freezer$cg" ]; then
   done
 fi
 jt=$(mktemp -d "${TMPDIR:-/tmp}/sbox-job-$SLURM_JOB_ID.XXXXXX") || exit 96
-np=
-trap '[ -n "$np" ] && kill "$np" 2>/dev/null && wait "$np"; rm -rf "$jt" "$jt.info" "$jt.net"' EXIT
+np= pp=
+trap 'for p in $np $pp; do kill "$p" 2>/dev/null && wait "$p"; done; rm -rf "$jt" "$jt.info" "$jt.net" "$jt.pub"' EXIT
 env=(%(env)s)
 while IFS= read -r -d '' kv; do
   case $kv in SLURM_*|SLURMD_NODENAME=*|CUDA_VISIBLE_DEVICES=*|ROCR_VISIBLE_DEVICES=*|GPU_DEVICE_ORDINAL=*) env+=("$kv") ;; esac
 done < <(env -0)
 # Slurm's submit dir is the broker's log dir; scripts expect the caller's cwd
 env+=(%(submit_dir)s)
-net=()
-%(net)sexec 8< <(base64 -d <<<'%(inner)s')
+net=() pub=()
+%(net)s%(pub)sexec 8< <(base64 -d <<<'%(inner)s')
 exec 9< <(base64 -d <<<'%(script)s')
 # In the background so signals for the batch shell (--signal=B:..., scancel -b -s)
 # can be passed on: bwrap doesn't forward them, and its pid-1 helper ignores
 # them, so they go to the helper's children, i.e. the user script (B: = only
 # the batch script, as without sbox). INT/QUIT can't be: bash ignores them in
 # background commands, and a script can't trap what was ignored at its start.
-"$B" --info-fd 7 %(layout)s --bind "$jt" /tmp "${dev[@]}" "${net[@]}" \
+"$B" --info-fd 7 %(layout)s --bind "$jt" /tmp "${dev[@]}" "${net[@]}" "${pub[@]}" \
   --dir /run/sbox-job --ro-bind-data 8 /run/sbox-job/inner --ro-bind-data 9 /run/sbox-job/script \
   --chdir %(chdir)s /usr/bin/env -i "${env[@]}" \
   /bin/bash /run/sbox-job/inner %(inner_args)s 7>"$jt.info" &
@@ -236,14 +238,16 @@ done
 exit $rc
 '''
 
-# SLURM_NET: a netproxy on the node, outside bwrap, with the session's
-# allowlist (no dialog on a node: unknown hosts are denied). Its source is the
-# broker's snapshot, so edits made from a sandbox never run outside one. The
-# job keeps --unshare-net and reaches it only through the socket. Both ends
-# run on the broker's python (netproxy needs >= 3.7; the node's may be older).
-LAUNCHER_NET = r'''mkdir -p "$jt.net/sock" || exit 96
+# netproxy on the node, outside bwrap, for SLURM_NET and --publish. Its source
+# is the broker's snapshot, so edits made from a sandbox never run outside
+# one. Both ends run on the broker's python (netproxy needs >= 3.7; the
+# node's may be older).
+LAUNCHER_NPY = r'''mkdir -p "$jt.net/sock" || exit 96
 base64 -d <<<'%(netproxy)s' > "$jt.net/netproxy.py"
-%(python)s "$jt.net/netproxy.py" serve --unix "$jt.net/sock/proxy.sock" --watch-pid $$ %(net_args)s \
+'''
+# SLURM_NET: the session's allowlist (no dialog on a node: unknown hosts are
+# denied). The job keeps --unshare-net and reaches it only through the socket.
+LAUNCHER_NET = r'''%(python)s "$jt.net/netproxy.py" serve --unix "$jt.net/sock/proxy.sock" --watch-pid $$ %(net_args)s \
   </dev/null >/dev/null 2>>"$jt.net/err" &
 np=$!
 for i in $(seq 50); do [ -S "$jt.net/sock/proxy.sock" ] && break; sleep 0.1; done
@@ -255,23 +259,41 @@ else
   cat "$jt.net/err" >&2
 fi
 '''
+# --publish: 0.0.0.0:PORT on the node -> $jt.pub/sock, where the job's relay
+# (slurm-inner.sh) forwards to its own 127.0.0.1:PORT. Inbound only: the job
+# keeps --unshare-net. A port already taken on the node fails the job.
+LAUNCHER_PUB = r'''mkdir "$jt.pub" || exit 96
+%(python)s "$jt.net/netproxy.py" publish --listen %(port)s --dir "$jt.pub" \
+  --port-file "$jt.net/pub.port" --watch-pid $$ </dev/null >/dev/null 2>>"$jt.net/pub.err" &
+pp=$!
+for i in $(seq 50); do [ -s "$jt.net/pub.port" ] && break; kill -0 "$pp" 2>/dev/null || break; sleep 0.1; done
+if [ ! -s "$jt.net/pub.port" ]; then
+  echo "sbox: can't publish port %(port)s on $(hostname -s) (in use?): job NOT run" >&2
+  cat "$jt.net/pub.err" >&2
+  exit 95
+fi
+pub=(--bind "$jt.pub" /run/sbox-pub --ro-bind "$jt.net/netproxy.py" /run/sbox-netproxy.py)
+env+=(SBOX_PYTHON=%(python)s SBOX_PUBLISH_PORT=%(port)s)
+'''
 
 
 def q(args):
     return " ".join(shlex.quote(a) for a in args)
 
 
-def make_launcher(cfg, script, submit_dir, chdir, out, err, inp, mode, sargs):
+def make_launcher(cfg, script, submit_dir, chdir, out, err, inp, mode, sargs, port=None):
     b64 = lambda b: base64.b64encode(b).decode()
+    py = shlex.quote(sys.executable)
+    npy = LAUNCHER_NPY % {"netproxy": b64(cfg.netproxy)} if cfg.net_args is not None or port else ""
     return (LAUNCHER_HEAD % {"bwrap": shlex.quote(cfg.bwrap)}
             + (LAUNCHER_GPU if cfg.gpu else "")
             + LAUNCHER_BODY % {
                 "env": q(cfg.env), "submit_dir": q(["SLURM_SUBMIT_DIR=" + submit_dir]),
                 "inner": b64(cfg.inner), "script": b64(script),
                 "layout": q(cfg.layout), "chdir": shlex.quote(chdir),
-                "net": LAUNCHER_NET % {"netproxy": b64(cfg.netproxy), "net_args": q(cfg.net_args),
-                                       "python": shlex.quote(sys.executable)}
-                       if cfg.netproxy else "",
+                "net": npy + (LAUNCHER_NET % {"net_args": q(cfg.net_args), "python": py}
+                              if cfg.net_args is not None else ""),
+                "pub": LAUNCHER_PUB % {"port": port, "python": py} if port else "",
                 "inner_args": q([out, err, inp, mode, "--"] + sargs)})
 
 
@@ -410,10 +432,19 @@ def plan_sbatch(cfg, argv, script, cwd):
             if not SIGNAL_RE.match(v):
                 raise Refused("--signal must be B:<sig>[@seconds], sig one of USR1 USR2 HUP TERM")
             sb.append("--signal=" + v)
+        elif cls == "publish":
+            lo, hi = cfg.publish or (1, 0)
+            if not cfg.publish:
+                raise Refused("--publish is off: set SLURM_PUBLISH_PORTS in paths.conf")
+            if not (v.isdigit() and lo <= int(v) <= hi):
+                raise Refused("--publish must be one port in %d-%d (SLURM_PUBLISH_PORTS)" % (lo, hi))
+            info["port"] = str(int(v))
         elif cls == "wait":
             sb.append("--wait")
         elif cls == "test":
             sb.append("--test-only")
+    if info.get("port") and info["array"]:
+        raise Refused("--publish and --array together: one port per job")
     if not name or CTRL.search(name):
         name = "sbatch"
     sb.append("--job-name=" + name)
@@ -436,7 +467,7 @@ def plan_sbatch(cfg, argv, script, cwd):
     log = posixpath.join(cfg.logdir, "%A_%a.log" if info["array"] else "%j.log")
     sb += ["--output=" + log, "--error=" + log, "--chdir=" + cfg.logdir]
     launcher = make_launcher(cfg, script, cwd, chdir, out, opts.get("error", ""),
-                             opts.get("input", ""), mode, sargs)
+                             opts.get("input", ""), mode, sargs, info.get("port"))
     return sb, launcher, info
 
 
@@ -632,11 +663,17 @@ def serve(a):
     cfg.env = read_nul(a.env)
     with open(a.inner, "rb") as f:
         cfg.inner = f.read()
-    cfg.netproxy = None
+    cfg.netproxy = cfg.net_args = None
     if a.netproxy:
         with open(a.netproxy, "rb") as f:
             cfg.netproxy = f.read()
+    # job network only with --net-args (SLURM_NET); netproxy alone serves --publish
+    if a.net_args:
         cfg.net_args = read_nul(a.net_args)
+    cfg.publish = None
+    if a.publish_ports:
+        lo, _, hi = a.publish_ports.partition("-")
+        cfg.publish = (int(lo), int(hi or lo))
     cfg.bwrap = a.bwrap or shutil.which("bwrap") or "/usr/bin/bwrap"
     cfg.bin = dict((c, shutil.which(c) or "/usr/bin/" + c) for c in SHIM_CMDS)
     cfg.run_env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
@@ -707,6 +744,7 @@ def main():
     s.add_argument("--gpu", action="store_true")
     s.add_argument("--netproxy", help="netproxy.py: give jobs filtered network (SLURM_NET)")
     s.add_argument("--net-args", help="NUL-separated args for netproxy serve (allowlist, log)")
+    s.add_argument("--publish-ports", default="", help="SLURM_PUBLISH_PORTS: LO-HI allowed for --publish")
     s.add_argument("--exclude", default="")
     s.add_argument("--constraint", default="")
     s.add_argument("--max-running", type=int, default=20,

@@ -55,6 +55,14 @@ if [ -S /run/sbox-net/proxy.sock ]; then
   for _i in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/3128) 2>/dev/null && break; sleep 0.1; done
 fi
 
+# --publish: the node's PORT (listener outside bwrap) reaches the job's own
+# 127.0.0.1:PORT through this relay
+if [ -n "${SBOX_PUBLISH_PORT:-}" ] && [ -d /run/sbox-pub ]; then
+  ( "${SBOX_PYTHON:-python3}" /run/sbox-netproxy.py relay --unix /run/sbox-pub/sock \
+      --connect "127.0.0.1:$SBOX_PUBLISH_PORT" >/dev/null 2>&1 & )
+  for _i in $(seq 50); do [ -S /run/sbox-pub/sock ] && break; sleep 0.1; done
+fi
+
 # honour the shebang like sbatch does (the data-bound file isn't executable);
 # as in Linux, everything after the interpreter is one argument
 IFS= read -r first < /run/sbox-job/script

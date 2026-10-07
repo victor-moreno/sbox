@@ -140,6 +140,12 @@ for p in "${RW[@]}"; do
   [ -e "$p" ] || continue
   USER_BINDS+=(--bind "$p" "$p")
 done
+# node-local paths (paths.conf NODE_RO/NODE_RW, e.g. /scratch on GPU nodes):
+# bwrap checks them where it runs, so jobs get them on nodes that have them
+# even if this host doesn't; RW after RO so a subdir can be writable
+NODE_BINDS=()
+for p in "${NODE_RO[@]+"${NODE_RO[@]}"}"; do NODE_BINDS+=(--ro-bind-try "$p" "$p"); done
+for p in "${NODE_RW[@]+"${NODE_RW[@]}"}"; do NODE_BINDS+=(--bind-try "$p" "$p"); done
 
 # ── conda bwrap args + env ──────────────────────────────────────────────────
 CONDA_BWRAP=()
@@ -338,9 +344,11 @@ bwrap_fs() {
     for _p in "${RO[@]}"; do [ -e "$_p" ] && FS+=(--ro-bind-try "$_p" "$_p"); done
     for _p in "${RW[@]}"; do [ -e "$_p" ] && FS+=(--bind-try "$_p" "$_p"); done
     [ "${#CONDA_BWRAP[@]}" -gt 0 ] && FS+=(--ro-bind-try "$HOME/.conda" "$HOME/.conda")
+    FS+=("${NODE_BINDS[@]+"${NODE_BINDS[@]}"}")
   else
     FS+=(
       "${USER_BINDS[@]}"
+      "${NODE_BINDS[@]+"${NODE_BINDS[@]}"}"
       "${CODER_BWRAP[@]}"
       "${CONDA_BWRAP[@]}"
       "${PROJECT_BWRAP[@]}"
@@ -369,6 +377,8 @@ bwrap_fs() {
   # FUSE mounts stay inside the sandbox's own user/mount namespace.
   for _d in /dev/null /dev/zero /dev/random /dev/urandom /dev/tty /dev/fuse; do
     [ "$1" = job ] && [ "$_d" = /dev/tty ] && continue
+    # jobs: checked on the node (/dev/fuse may differ from this host)
+    if [ "$1" = job ]; then FS+=(--dev-bind-try "$_d" "$_d"); continue; fi
     # --dev-bind (not --bind) required for char devices: --bind sets MS_NODEV
     # which blocks device file access on older kernels (e.g. 4.18).
     [ -e "$_d" ] && FS+=(--dev-bind "$_d" "$_d")
@@ -570,7 +580,9 @@ if [ "${ENABLE_SLURM:-0}" = "broker" ]; then
     --watch-pid $$ --cleanup "$SLURMDIR")
   _bw="$(command -v bwrap)" && _sl_args+=(--bwrap "$_bw")
   [ "${ENABLE_GPU:-1}" = "1" ] && _sl_args+=(--gpu)
-  [ "$_job_net" = 1 ] && _sl_args+=(--netproxy "$SBOX_ROOT/lib/netproxy.py" --net-args "$SLURMDIR/netargs")
+  # netproxy also serves --publish (SLURM_PUBLISH_PORTS, inbound to one job port)
+  _sl_args+=(--netproxy "$SBOX_ROOT/lib/netproxy.py" --publish-ports "${SLURM_PUBLISH_PORTS:-}")
+  [ "$_job_net" = 1 ] && _sl_args+=(--net-args "$SLURMDIR/netargs")
   python3 "$SBOX_ROOT/lib/slurmproxy.py" "${_sl_args[@]}" \
     </dev/null >/dev/null 2>>"$_state/slurm/broker.log" &
   for _i in $(seq 50); do [ -S "$SLURMDIR/sock/sock" ] && break; sleep 0.1; done

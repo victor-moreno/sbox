@@ -348,6 +348,23 @@ Must work:
   allowed "for this session" in a dialog don't carry over. Verdicts go to
   the project's `.tmp/sbox-net.log` tagged `(slurm job)`. The nodes themselves
   must reach the internet.
+- Node-local paths (2026-10-07): `RO`/`RW` entries reach jobs only if they
+  existed where the session was launched, so `/scratch` (GPU nodes only) was
+  dropped. `NODE_RO`/`NODE_RW` are bound with `--ro-bind-try`/`--bind-try`
+  without that check, so bwrap decides on the node; `/dev/fuse` is
+  `--dev-bind-try` in jobs for the same reason.
+- Inbound to a job (2026-10-07): `sbatch --publish=PORT`, port within
+  `SLURM_PUBLISH_PORTS`, not with `--array`. The launcher runs
+  `netproxy.py publish` on the node, outside bwrap, listening on
+  `0.0.0.0:PORT` (taken port: exit 95, job not run) and forwarding to
+  `$jt.pub/sock`, bound at `/run/sbox-pub`; `slurm-inner.sh` starts
+  `netproxy.py relay` there to the job's `127.0.0.1:PORT`
+  (`SBOX_PUBLISH_PORT` in the env). The job owns that directory, so
+  `publish` opens `sock` with `O_PATH|O_NOFOLLOW` and connects through
+  `/proc/self/fd/N`, refusing anything but a socket with one link: a planted
+  symlink (e.g. to munge's socket) or a hard link (e.g. of the job's own
+  netproxy socket) is never reached. The port is open to the whole cluster
+  network: authentication is the server's job.
 - `$HOME` inside a job is a tmpfs plus the paths.conf binds, like the
   interactive sandbox: writes elsewhere in `$HOME` vanish.
 - `module` (Lmod) isn't defined under `env -i`; scripts source

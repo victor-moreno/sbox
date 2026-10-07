@@ -13,6 +13,9 @@ outbound connection has to come through here, via HTTP(S)_PROXY.
            bridging the private network namespace to the proxy outside.
   relay    Linux only, runs OUTSIDE: unix socket -> one fixed host:port (the
            `aicode -local` model server), the other end of a forward.
+  publish  Linux only, runs OUTSIDE on a compute node: 0.0.0.0:PORT -> the
+           socket a slurm job's relay listens on (sbatch --publish), opened
+           without following anything the job may have planted there.
   connect  Linux only, runs INSIDE: one CONNECT tunnel on stdin/stdout, used
            as ssh's ProxyCommand (ssh speaks neither HTTP proxy nor DNS).
   ask      the question itself, run by `serve` in a tmux popup (Linux, when
@@ -399,6 +402,43 @@ async def relay(a):
         await server.serve_forever()
 
 
+def open_job_socket(dir_fd):
+    # the job owns the socket's directory: refuse a symlink (it would resolve
+    # on the node, e.g. to munge's socket) or a hard link (e.g. of its own
+    # netproxy socket); connect through the O_PATH fd, so no name is followed
+    fd = os.open("sock", os.O_PATH | os.O_NOFOLLOW, dir_fd=dir_fd)
+    st = os.fstat(fd)
+    if not stat.S_ISSOCK(st.st_mode) or st.st_nlink != 1:
+        os.close(fd)
+        raise OSError("not a plain socket")
+    return fd
+
+
+async def publish(a):
+    dir_fd = os.open(a.dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+    async def handle(reader, writer):
+        try:
+            fd = open_job_socket(dir_fd)
+            try:
+                up_r, up_w = await asyncio.open_unix_connection("/proc/self/fd/%d" % fd)
+            finally:
+                os.close(fd)
+        except OSError:
+            writer.close()
+            return
+        await asyncio.gather(pipe(reader, up_w), pipe(up_r, writer))
+
+    # fails here (port in use) before the port file exists: the launcher waits on it
+    server = await asyncio.start_server(handle, "0.0.0.0", a.listen)
+    with open(a.port_file, "w") as f:
+        f.write("%d\n" % a.listen)
+    if a.watch_pid:
+        asyncio.ensure_future(watch(a.watch_pid, None))
+    async with server:
+        await server.serve_forever()
+
+
 def connect(a):
     # ssh's ProxyCommand inside the sandbox: talk to the proxy's unix socket
     # directly (no dependency on the 127.0.0.1:3128 forwarder) and hand ssh
@@ -470,6 +510,11 @@ def main():
     r.add_argument("--unix", required=True)
     r.add_argument("--connect", required=True)
     r.add_argument("--watch-pid", type=int)
+    u = sub.add_parser("publish")
+    u.add_argument("--listen", type=int, required=True)
+    u.add_argument("--dir", required=True, help="holds the job's socket, named sock")
+    u.add_argument("--port-file", required=True)
+    u.add_argument("--watch-pid", type=int)
     c = sub.add_parser("connect")
     c.add_argument("--unix", required=True)
     c.add_argument("host")
@@ -488,7 +533,8 @@ def main():
         return connect(a)
     # Ctrl-C in the sandboxed terminal must not take the proxy down
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    asyncio.run({"serve": serve, "forward": forward, "relay": relay}[a.mode](a))
+    asyncio.run({"serve": serve, "forward": forward, "relay": relay,
+                 "publish": publish}[a.mode](a))
 
 
 if __name__ == "__main__":
