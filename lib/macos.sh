@@ -8,6 +8,12 @@ CODER="$1"; shift
 SANDBOX_DIR="$(pwd -P)"
 SBOX_ROOT="${SBOX_ROOT:-${0:A:h:h}}"
 
+SBOX_LAUNCHLOG="$HOME/.local/state/sbox/launch.log"
+mkdir -p "${SBOX_LAUNCHLOG:h}"
+print -r -- "--- $(date '+%F %T') $CODER $SANDBOX_DIR" >> "$SBOX_LAUNCHLOG"
+exec 3>&2
+exec 2> >(tee -a "$SBOX_LAUNCHLOG" >&3)
+
 # load user-editable whitelist (RW + RO + CODER_RW variables)
 . "$SBOX_ROOT/paths.conf"
 # per-launch extras from aicode/sbox: -ro/-rw, .paths.local.conf (lib/extra-paths.sh)
@@ -126,7 +132,7 @@ if [[ -n "${DOCKER_BUSY:-}" ]]; then
   echo "$DOCKER_BUSY_MSG" >&2
   # the coder's UI draws over it at once: wait for a key so it is noticed
   # (terminal only, scripted launches go on); Ctrl-C quits before any setup
-  if [[ -t 0 && -t 2 ]]; then
+  if [[ -t 0 && -t 3 ]]; then
     read -rs -k1 "?aicode: press any key to continue without docker, Ctrl-C to quit "
     echo >&2
   fi
@@ -338,6 +344,7 @@ if [[ "$CODER" != "shell" ]]; then
   # Ctrl-C is the coder's to handle; ignoring it here keeps cleanup deferred
   # until the coder itself exits.
   trap '' INT TERM
+  exec 2>&3 3>&-
   sandbox-exec -f "$POLICY" "$CODER_BIN" "$@"
   exit $?
 fi
@@ -374,5 +381,5 @@ echo "  python: \$(which python 2>/dev/null || echo 'not in PATH')"
 echo "  type 'exit' to leave"
 echo ""
 RCEOF
-
+exec 2>&3 3>&-
 ZDOTDIR="$ZDOT" sandbox-exec -f "$POLICY" /bin/zsh --no-globalrcs -i
