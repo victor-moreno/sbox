@@ -190,7 +190,7 @@ dev=()
 '''
 LAUNCHER_GPU = r'''# GPUs decided on the node; access is still gated by the job's device cgroup
 for d in /dev/nvidia*; do [ -e "$d" ] && dev+=(--dev-bind "$d" "$d"); done
-[ ${#dev[@]} -gt 0 ] && [ -d /sys/module/nvidia ] && dev+=(--tmpfs /dev/shm --dir /sys --ro-bind /sys/module /sys/module)
+[ ${#dev[@]} -gt 0 ] && [ -d /sys/module/nvidia ] && dev+=(--dir /sys --ro-bind /sys/module /sys/module)
 '''
 LAUNCHER_BODY = r'''# scancel/timeout SIGKILL this script (no TERM seen), so the trap only covers
 # normal ends: sweep dirs of this user's jobs whose cgroup is gone (v1 layout;

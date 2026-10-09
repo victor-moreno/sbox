@@ -269,9 +269,12 @@ by hand:
 `ssh -o ProxyCommand='nc -X connect -x ${HTTPS_PROXY#http://} %h %p' 10.10.0.2`
 
 - GPU: with `ENABLE_GPU=1` (paths.conf, Linux) the `/dev/nvidia*` devices,
-  `/sys/module` (read-only) and a `/dev/shm` tmpfs are bound in when the host
-  has NVIDIA devices, so CUDA works inside the sandbox; `CUDA_VISIBLE_DEVICES`
-  is forwarded. `ENABLE_GPU=0` hides the GPUs.
+  `/sys/module` (read-only) are bound in when the host has NVIDIA devices,
+  so CUDA works inside the sandbox; `CUDA_VISIBLE_DEVICES` is forwarded.
+  `ENABLE_GPU=0` hides the GPUs.
+- `/dev/shm` (Linux, sessions and jobs): a private tmpfs for POSIX shared
+  memory (PostgreSQL, torch dataloaders, NCCL); the host's segments are not
+  visible. It uses RAM like `/tmp`.
 - Apptainer (Linux, unprivileged/user-namespace install): `/dev/fuse` and a
   private `/var/tmp` are always provided; add `/var/lib/apptainer` (session
   dir) and `/sys` to `RO` in paths.conf. Without `/dev/fuse` each run of a

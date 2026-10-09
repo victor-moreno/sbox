@@ -109,9 +109,9 @@ if ! "$B" --unshare-pid --ro-bind / / --proc /proc /bin/true 2>/dev/null; then
   exit 97                               # fail closed: payload never runs unsandboxed
 fi
 # GPUs detected on the node at run time (the login node may have none), if ENABLE_GPU=1,
-# same binds as interactive: /dev/nvidia*, /dev/shm tmpfs, /sys/module RO (NVML needs it)
+# same binds as interactive: /dev/nvidia*, /sys/module RO (NVML needs it); /dev/shm is in the layout
 dev=(); for d in /dev/nvidia*; do [ -e "$d" ] && dev+=(--dev-bind "$d" "$d"); done
-[ ${#dev[@]} -gt 0 ] && [ -d /sys/module/nvidia ] && dev+=(--tmpfs /dev/shm --dir /sys --ro-bind /sys/module /sys/module)
+[ ${#dev[@]} -gt 0 ] && [ -d /sys/module/nvidia ] && dev+=(--dir /sys --ro-bind /sys/module /sys/module)
 # scancel/timeout SIGKILL the batch shell (no TERM first), so the EXIT trap only covers
 # normal ends: first remove this user's sbox-job-<id>.* dirs whose job cgroup
 # (/sys/fs/cgroup/freezer/slurm_<node>/uid_<uid>/job_<id>) is gone

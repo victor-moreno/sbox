@@ -369,6 +369,10 @@ bwrap_fs() {
     --symlink /proc/self/fd/0 /dev/stdin
     --symlink /proc/self/fd/1 /dev/stdout
     --symlink /proc/self/fd/2 /dev/stderr
+    # POSIX shared memory (shm_open: PostgreSQL, torch dataloaders, NCCL).
+    # A fresh private tmpfs, not the host's /dev/shm, so no host segments
+    # are visible; like /tmp it is RAM, charged to the job's memory cgroup.
+    --tmpfs /dev/shm
   )
   # batch jobs have no terminal
   [ "$1" != job ] && [ -d /dev/pts ] && FS+=(--bind /dev/pts /dev/pts)
@@ -399,8 +403,8 @@ BWRAP_BASE=(
 # has the devices): the char devices plus
 # /sys/module/nvidia, which the tmpfs root hides — NVML reads
 # /sys/module/nvidia/initstate and otherwise fails with "GPU access blocked
-# by the operating system" even with the devices bound. /dev/shm is needed by
-# torch dataloader workers and NCCL, and /dev is a bare --dir here.
+# by the operating system" even with the devices bound. (/dev/shm is in
+# bwrap_fs for every session.)
 GPU_BWRAP=()
 if [ "${ENABLE_GPU:-1}" = "1" ]; then
   for _d in /dev/nvidia*; do
@@ -410,7 +414,6 @@ fi
 if [ "${#GPU_BWRAP[@]}" -gt 0 ] && [ -d /sys/module/nvidia ]; then
   BWRAP_BASE+=(
     "${GPU_BWRAP[@]}"
-    --tmpfs /dev/shm
     --dir /sys
     --ro-bind /sys/module /sys/module
   )
