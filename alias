@@ -1,3 +1,5 @@
+# Alias file
+
 claude() {
   local name
   if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
